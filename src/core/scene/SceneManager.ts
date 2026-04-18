@@ -9,13 +9,14 @@
  * 3. レンダーループの実行
  * 4. リサイズ処理
  * 5. カメラプリセットの適用
- * 6. 後片付け
+ * 6. 自由視点との共存制御
+ * 7. 後片付け
  *
  * 今後の拡張想定:
- * - VenueBuilder / StageBuilder / SeatBlockBuilder の追加拡張
- * - SpeakerBuilder の呼び出し
+ * - SpeakerBuilder の詳細化
  * - Scene 内オブジェクト選択連携
- * - Toolbar と連携した視点切替
+ * - JSON ベースのレイアウト読込
+ * - 自席位置の本格反映
  */
 
 import * as THREE from 'three'
@@ -24,13 +25,13 @@ import { createBaseSceneObjects, type BaseSceneObjects } from '@/core/scene/crea
 import { VenueBuilder } from '@/core/scene/VenueBuilder'
 import { StageBuilder } from '@/core/scene/StageBuilder'
 import { SeatBlockBuilder } from '@/core/scene/SeatBlockBuilder'
+import { SpeakerBuilder } from '@/core/scene/SpeakerBuilder'
 import { findCameraPresetById } from '@/core/scene/cameraPresets'
 import type { CameraPresetId } from '@/types/view'
 
 export class SceneManager {
   /**
    * three.js を描画する親コンテナ。
-   * Vue 側から渡される DOM 要素。
    */
   private readonly container: HTMLElement
 
@@ -49,15 +50,25 @@ export class SceneManager {
 
   /**
    * Scene に追加した基本オブジェクト群。
-   * dispose や簡易アニメーションで使う。
    */
   private baseObjects!: BaseSceneObjects
 
   /**
    * 現在適用中のカメラプリセットID。
-   * 初期値は FOH にしておく。
    */
   private currentPresetId: CameraPresetId = 'foh'
+
+  /**
+   * カメラプリセット適用中かどうかを管理するフラグ。
+   * programmatic なカメラ更新と、ユーザーの手操作を区別するために使う。
+   */
+  private isApplyingCameraPreset = false
+
+  /**
+   * ユーザーが手でカメラを動かしたことを外側へ通知するためのコールバック。
+   * SceneCanvas から登録され、viewStore を free に切り替える用途で使う。
+   */
+  private onManualCameraControl?: () => void
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -65,7 +76,6 @@ export class SceneManager {
 
   /**
    * Scene 全体を初期化する。
-   * Vue 側からはまずこのメソッドだけ呼べばよい。
    */
   public init(): void {
     this.createScene()
@@ -77,8 +87,6 @@ export class SceneManager {
 
     /**
      * 初期視点として FOH を適用する。
-     * ここでプリセット適用の流れを作っておくことで、
-     * 後で UI 連携しやすくなる。
      */
     this.setCameraPreset(this.currentPresetId)
   }
@@ -109,6 +117,15 @@ export class SceneManager {
   }
 
   /**
+   * 外側から、手動カメラ操作時の通知コールバックを登録する。
+   *
+   * @param callback ユーザー手動操作時に呼ぶ関数
+   */
+  public setOnManualCameraControl(callback: () => void): void {
+    this.onManualCameraControl = callback
+  }
+
+  /**
    * カメラプリセットを適用する。
    *
    * @param presetId 適用したいカメラプリセットID
@@ -120,6 +137,8 @@ export class SceneManager {
       return
     }
 
+    this.isApplyingCameraPreset = true
+
     /**
      * カメラ位置をプリセット定義へ合わせる。
      */
@@ -127,7 +146,6 @@ export class SceneManager {
 
     /**
      * OrbitControls の注視点をプリセット定義へ合わせる。
-     * lookAt ではなく target を更新するのが重要。
      */
     this.controls.target.set(preset.target.x, preset.target.y, preset.target.z)
 
@@ -137,11 +155,11 @@ export class SceneManager {
     this.controls.update()
 
     this.currentPresetId = presetId
+    this.isApplyingCameraPreset = false
   }
 
   /**
    * 現在のカメラプリセットIDを返す。
-   * 後で UI 同期やデバッグに使えるようにしておく。
    */
   public getCurrentPresetId(): CameraPresetId {
     return this.currentPresetId
@@ -149,13 +167,13 @@ export class SceneManager {
 
   /**
    * three.js 関連の後片付けを行う。
-   * コンポーネント破棄時に呼ぶ。
    */
   public dispose(): void {
     window.removeEventListener('resize', this.handleResize)
     cancelAnimationFrame(this.animationFrameId)
 
     if (this.controls) {
+      this.controls.removeEventListener('start', this.handleControlsStart)
       this.controls.dispose()
     }
 
@@ -167,9 +185,6 @@ export class SceneManager {
     if (this.renderer) {
       this.renderer.dispose()
 
-      /**
-       * container 内に追加した canvas を取り外す。
-       */
       if (this.renderer.domElement.parentElement === this.container) {
         this.container.removeChild(this.renderer.domElement)
       }
@@ -186,7 +201,6 @@ export class SceneManager {
 
   /**
    * Camera を生成する。
-   * PerspectiveCamera を使い、遠近感のある表示にする。
    */
   private createCamera(): void {
     const width = this.container.clientWidth
@@ -213,7 +227,6 @@ export class SceneManager {
 
   /**
    * OrbitControls を生成する。
-   * マウス操作でカメラを回転・ズーム・平行移動できるようにする。
    */
   private createControls(): void {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
@@ -232,17 +245,18 @@ export class SceneManager {
 
     /**
      * 上下回転の制限。
-     * 真上・真下まで回り込まないようにして操作性を保つ。
      */
     this.controls.maxPolarAngle = Math.PI / 2
+
+    /**
+     * ユーザーがマウス操作を開始した時のイベント。
+     * ここで「今は自由視点に切り替わった」と見なす。
+     */
+    this.controls.addEventListener('start', this.handleControlsStart)
   }
 
   /**
    * Scene に表示用オブジェクトを追加する。
-   * - 基本補助オブジェクト
-   * - 会場オブジェクト
-   * - ステージオブジェクト
-   * - 客席ブロック
    */
   private createObjects(): void {
     this.baseObjects = createBaseSceneObjects(this.scene)
@@ -255,6 +269,9 @@ export class SceneManager {
 
     const seatBlockBuilder = new SeatBlockBuilder(this.scene)
     seatBlockBuilder.build()
+
+    const speakerBuilder = new SpeakerBuilder(this.scene)
+    speakerBuilder.build()
   }
 
   /**
@@ -265,11 +282,36 @@ export class SceneManager {
   }
 
   /**
-   * リサイズイベント時に呼ばれる関数。
-   * removeEventListener のためにアロー関数で保持している。
+   * リサイズイベント時の処理。
    */
   private readonly handleResize = (): void => {
     this.resize()
+  }
+
+  /**
+   * OrbitControls による手動操作開始時の処理。
+   *
+   * ここでやっていること:
+   * - プリセット適用中のイベントなら無視
+   * - すでに free なら何もしない
+   * - それ以外なら内部状態を free に更新し、
+   *   外側へ「手動操作が始まった」と通知する
+   *
+   * この処理によって、
+   * FOH や User Seat から手でカメラを動かした時に、
+   * Toolbar 側の表示も Free に切り替えられる。
+   */
+  private readonly handleControlsStart = (): void => {
+    if (this.isApplyingCameraPreset) {
+      return
+    }
+
+    if (this.currentPresetId === 'free') {
+      return
+    }
+
+    this.currentPresetId = 'free'
+    this.onManualCameraControl?.()
   }
 
   /**
@@ -284,12 +326,7 @@ export class SceneManager {
     this.baseObjects.cube.rotation.x += 0.01
     this.baseObjects.cube.rotation.y += 0.01
 
-    /**
-     * enableDamping を有効にしているため、
-     * 毎フレーム update() を呼ぶ必要がある。
-     */
     this.controls.update()
-
     this.renderer.render(this.scene, this.camera)
   }
 }

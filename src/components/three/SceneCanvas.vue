@@ -19,6 +19,7 @@
  * 2. mounted 時に SceneManager を初期化する
  * 3. unmounted 時に SceneManager を破棄する
  * 4. viewStore の変更を監視して、SceneManager のカメラ視点へ反映する
+ * 5. 手動カメラ操作を検知して、viewStore を free に切り替える
  */
 
 import { onMounted, onUnmounted, ref, watch } from 'vue'
@@ -33,39 +34,53 @@ const canvasContainer = ref<HTMLElement | null>(null)
 
 /**
  * three.js 全体を管理するクラス。
- * mounted 時に生成し、unmounted 時に破棄する。
  */
 let sceneManager: SceneManager | null = null
 
 /**
  * 視点ストア。
- * Toolbar 側で currentView が変わると、ここでも反映される。
  */
 const viewStore = useViewStore()
-
-/**
- * storeToRefs を使うことで、Pinia の state を watch しやすい ref に変換する。
- */
 const { currentView } = storeToRefs(viewStore)
 
 onMounted(() => {
   if (!canvasContainer.value) return
 
   sceneManager = new SceneManager(canvasContainer.value)
+
+  /**
+   * ユーザーが手動でカメラを動かした時は、
+   * Toolbar 側の表示も free に揃える。
+   *
+   * ポイント:
+   * - ここでは store だけを書き換える
+   * - SceneManager 側では、すでに currentPresetId を free に更新済み
+   * - そのため watch 側で二重にカメラリセットされない
+   */
+  sceneManager.setOnManualCameraControl(() => {
+    if (viewStore.currentView !== 'free') {
+      viewStore.setCurrentView('free')
+    }
+  })
+
   sceneManager.init()
   sceneManager.start()
 })
 
 /**
  * 視点変更を監視して、SceneManager のカメラへ反映する。
- *
- * ポイント:
- * - immediate: false にしているため、初回マウント時は SceneManager.init() 側の
- *   初期プリセット適用を使う
- * - Toolbar 側で currentView が変わった時だけ、ここが発火する
  */
 watch(currentView, (newPresetId) => {
   if (!sceneManager) return
+
+  /**
+   * すでに同じ視点IDなら何もしない。
+   * これにより、手動操作で free に切り替わった時に
+   * カメラ位置が不必要にリセットされるのを防ぐ。
+   */
+  if (newPresetId === sceneManager.getCurrentPresetId()) {
+    return
+  }
 
   sceneManager.setCameraPreset(newPresetId)
 })
@@ -77,19 +92,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/**
- * SceneCanvas 全体の見た目。
- * App レイアウトの中央領域いっぱいに広がる想定。
- */
 .scene-canvas {
   min-width: 0;
   min-height: 0;
   background: #111;
 }
 
-/**
- * three.js の canvas を挿入するコンテナ。
- */
 .scene-canvas__container {
   width: 100%;
   height: 100%;

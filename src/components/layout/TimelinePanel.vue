@@ -4,19 +4,31 @@
       <div class="timeline-panel__heading">
         <h2>Phases</h2>
         <p class="timeline-panel__description">
-          現在の view / speaker 状態を phase として保存できます。
+          phase 保存・読込・再生時間編集・再生中 phase の確認ができます。
         </p>
       </div>
 
       <div class="timeline-panel__actions">
-        <button type="button" @click="handleSavePhase">Add Phase</button>
-        <button type="button" @click="handleLoadSelectedPhase" :disabled="!hasSelectedPhase">
+        <button type="button" @click="handleSavePhase" :disabled="isPlaying">Add Phase</button>
+        <button
+          type="button"
+          @click="handleLoadSelectedPhase"
+          :disabled="!hasSelectedPhase || isPlaying"
+        >
           Load Selected
         </button>
-        <button type="button" @click="handleRenameSelectedPhase" :disabled="!hasSelectedPhase">
+        <button
+          type="button"
+          @click="handleRenameSelectedPhase"
+          :disabled="!hasSelectedPhase || isPlaying"
+        >
           Edit Phase
         </button>
-        <button type="button" @click="handleDeleteSelectedPhase" :disabled="!hasSelectedPhase">
+        <button
+          type="button"
+          @click="handleDeleteSelectedPhase"
+          :disabled="!hasSelectedPhase || isPlaying"
+        >
           Delete Phase
         </button>
       </div>
@@ -32,12 +44,39 @@
         :key="phase.id"
         type="button"
         class="timeline-panel__phase"
-        :class="{ 'timeline-panel__phase--selected': phase.id === selectedPhaseId }"
+        :class="{
+          'timeline-panel__phase--selected': phase.id === selectedPhaseId,
+          'timeline-panel__phase--playing': phase.id === activePhaseId && isPlaying,
+          'timeline-panel__phase--paused': phase.id === activePhaseId && isPaused,
+        }"
         @click="handleSelectPhase(phase.id)"
         @dblclick="handleLoadPhaseById(phase.id)"
       >
-        <span class="timeline-panel__phase-name">{{ phase.name }}</span>
+        <div class="timeline-panel__phase-top">
+          <span class="timeline-panel__phase-name">{{ phase.name }}</span>
+          <span v-if="phase.id === activePhaseId && isPlaying" class="timeline-panel__badge">
+            ▶
+          </span>
+          <span v-else-if="phase.id === activePhaseId && isPaused" class="timeline-panel__badge">
+            ❚❚
+          </span>
+        </div>
+
         <span class="timeline-panel__phase-time">{{ formatCreatedAt(phase.createdAt) }}</span>
+
+        <label class="timeline-panel__duration" @click.stop>
+          <span>Duration</span>
+          <input
+            :value="phase.durationMs"
+            type="number"
+            min="100"
+            step="100"
+            @click.stop
+            @dblclick.stop
+            @change="handleDurationChange(phase.id, $event)"
+          />
+          <span>ms</span>
+        </label>
       </button>
     </div>
   </footer>
@@ -51,16 +90,21 @@
  * このファイルの目的:
  * - 保存済み phase を一覧表示する
  * - phase の選択 / 読込 / 編集 / 削除を行う
- * - 既存レイアウトを崩さず、見やすいタイムライン表示にする
+ * - phase ごとの durationMs を編集する
+ * - 再生中 / 一時停止中の active phase を視覚表示する
  */
 
 import { computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 
 import { usePhaseStore } from '@/stores/phaseStore'
+import { usePlaybackStore } from '@/stores/playbackStore'
 
 const phaseStore = usePhaseStore()
+const playbackStore = usePlaybackStore()
+
 const { phases, selectedPhaseId } = storeToRefs(phaseStore)
+const { activePhaseId, isPlaying, isPaused } = storeToRefs(playbackStore)
 
 const hasSelectedPhase = computed<boolean>(() => phaseStore.hasSelectedPhase)
 
@@ -145,6 +189,35 @@ function handleDeleteSelectedPhase(): void {
 }
 
 /**
+ * duration 入力変更を反映する。
+ *
+ * 再生中の active phase を編集した場合は、
+ * 現在 phase の timer を張り直す。
+ *
+ * @param phaseId 対象 phase ID
+ * @param event input change event
+ */
+function handleDurationChange(phaseId: string, event: Event): void {
+  const target = event.target as HTMLInputElement
+  const nextValue = Number(target.value)
+
+  const updated = phaseStore.updatePhaseDurationById(phaseId, nextValue)
+
+  if (!updated) {
+    return
+  }
+
+  const updatedPhase = phaseStore.phases.find((phase) => phase.id === phaseId)
+  if (updatedPhase) {
+    target.value = String(updatedPhase.durationMs)
+  }
+
+  if (playbackStore.isPlaying && playbackStore.activePhaseId === phaseId) {
+    playbackStore.restartCurrentPhaseTimer()
+  }
+}
+
+/**
  * 作成日時を画面表示用に整形する。
  *
  * @param createdAt ISO 文字列
@@ -211,15 +284,15 @@ function formatCreatedAt(createdAt: string): string {
 }
 
 .timeline-panel__phase {
-  min-width: 150px;
-  max-width: 190px;
+  min-width: 180px;
+  max-width: 220px;
   border: 1px solid #ccc;
   background: #f5f5f5;
   border-radius: 8px;
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   text-align: left;
   cursor: pointer;
   flex-shrink: 0;
@@ -228,6 +301,23 @@ function formatCreatedAt(createdAt: string): string {
 .timeline-panel__phase--selected {
   border-color: #2563eb;
   background: #dbeafe;
+}
+
+.timeline-panel__phase--playing {
+  border-color: #16a34a;
+  background: #dcfce7;
+}
+
+.timeline-panel__phase--paused {
+  border-color: #d97706;
+  background: #fef3c7;
+}
+
+.timeline-panel__phase-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .timeline-panel__phase-name {
@@ -239,8 +329,27 @@ function formatCreatedAt(createdAt: string): string {
   white-space: nowrap;
 }
 
+.timeline-panel__badge {
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .timeline-panel__phase-time {
   font-size: 11px;
   color: #666;
+}
+
+.timeline-panel__duration {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #555;
+}
+
+.timeline-panel__duration input {
+  width: 72px;
+  padding: 4px 6px;
+  font-size: 12px;
 }
 </style>

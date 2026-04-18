@@ -6,24 +6,27 @@
         Selected Phase:
         <strong>{{ selectedPhaseName }}</strong>
       </span>
+      <span class="toolbar__status" :class="toolbarStatusClass">
+        {{ playbackStatusLabel }}
+      </span>
     </div>
 
     <div class="toolbar__center">
-      <button type="button" @click="handleLoadPhase" :disabled="!hasSelectedPhase">Load</button>
-      <button type="button" @click="handleSavePhase">Save</button>
-      <button type="button">Play</button>
-      <button type="button">Pause</button>
-      <button type="button">Stop</button>
+      <button type="button" @click="handleLoadPhase" :disabled="!hasSelectedPhase || isPlaying">
+        Load
+      </button>
+      <button type="button" @click="handleSavePhase" :disabled="isPlaying">Save</button>
+      <button type="button" @click="handlePlay" :disabled="phases.length === 0 || isPlaying">
+        Play
+      </button>
+      <button type="button" @click="handlePause" :disabled="!isPlaying">Pause</button>
+      <button type="button" @click="handleStop" :disabled="!isPlaying && !isPaused">Stop</button>
     </div>
 
     <div class="toolbar__right">
       <label for="view-select">View</label>
 
-      <!--
-        現在の視点IDを v-model で select にバインドしている。
-        ユーザーが選択を変えると、viewStore.currentView が更新される。
-      -->
-      <select id="view-select" v-model="selectedView" class="toolbar__select">
+      <select id="view-select" v-model="selectedView" class="toolbar__select" :disabled="isPlaying">
         <option v-for="preset in cameraPresets" :key="preset.id" :value="preset.id">
           {{ preset.label }}
         </option>
@@ -40,32 +43,32 @@
  * このファイルの目的:
  * - 保存 / 読込などの主要操作ボタンを提供する
  * - 視点切替UIを提供する
- * - phaseStore と接続して phase の保存 / 読込を行えるようにする
+ * - phaseStore と playbackStore を接続して phase 再生を行う
  */
 
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 
 import { cameraPresets } from '@/core/scene/cameraPresets'
 import { usePhaseStore } from '@/stores/phaseStore'
+import { usePlaybackStore } from '@/stores/playbackStore'
 import { useViewStore } from '@/stores/viewStore'
 
 import type { CameraPresetId } from '@/types/view'
 
-/**
- * 視点ストア。
- */
 const viewStore = useViewStore()
-
-/**
- * phase ストア。
- */
 const phaseStore = usePhaseStore()
+const playbackStore = usePlaybackStore()
+
+const { currentView } = storeToRefs(viewStore)
+const { phases } = storeToRefs(phaseStore)
+const { isPlaying, isPaused, activePhaseId } = storeToRefs(playbackStore)
 
 /**
  * select 用の双方向バインディング。
  */
 const selectedView = computed({
-  get: (): CameraPresetId => viewStore.currentView,
+  get: (): CameraPresetId => currentView.value,
   set: (value: CameraPresetId): void => {
     viewStore.setCurrentView(value)
   },
@@ -83,8 +86,46 @@ const selectedPhaseName = computed<string>(() => {
  */
 const hasSelectedPhase = computed<boolean>(() => phaseStore.hasSelectedPhase)
 
+/**
+ * 再生状態の表示ラベル。
+ */
+const playbackStatusLabel = computed<string>(() => {
+  if (isPlaying.value) {
+    const activeName =
+      phaseStore.phases.find((phase) => phase.id === activePhaseId.value)?.name ?? 'Playing'
+    return `Playing: ${activeName}`
+  }
+
+  if (isPaused.value) {
+    const activeName =
+      phaseStore.phases.find((phase) => phase.id === activePhaseId.value)?.name ?? 'Paused'
+    return `Paused: ${activeName}`
+  }
+
+  return 'Stopped'
+})
+
+/**
+ * 再生状態に応じたクラス。
+ */
+const toolbarStatusClass = computed<string>(() => {
+  if (isPlaying.value) {
+    return 'toolbar__status--playing'
+  }
+
+  if (isPaused.value) {
+    return 'toolbar__status--paused'
+  }
+
+  return 'toolbar__status--stopped'
+})
+
 onMounted(() => {
   phaseStore.initialize()
+})
+
+onBeforeUnmount(() => {
+  playbackStore.dispose()
 })
 
 /**
@@ -107,15 +148,30 @@ function handleSavePhase(): void {
 function handleLoadPhase(): void {
   phaseStore.loadSelectedPhase()
 }
+
+/**
+ * 再生を開始する。
+ */
+function handlePlay(): void {
+  playbackStore.play()
+}
+
+/**
+ * 一時停止する。
+ */
+function handlePause(): void {
+  playbackStore.pause()
+}
+
+/**
+ * 停止して先頭へ戻す。
+ */
+function handleStop(): void {
+  playbackStore.stop()
+}
 </script>
 
 <style scoped>
-/**
- * ツールバー全体。
- * 左: タイトル / 選択中 phase
- * 中央: 操作ボタン
- * 右: 視点切替
- */
 .toolbar {
   height: 56px;
   border-bottom: 1px solid #ccc;
@@ -145,6 +201,28 @@ function handleLoadPhase(): void {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.toolbar__status {
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.toolbar__status--playing {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.toolbar__status--paused {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.toolbar__status--stopped {
+  background: #e5e7eb;
+  color: #374151;
 }
 
 .toolbar__center {

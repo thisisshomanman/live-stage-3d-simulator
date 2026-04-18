@@ -6,6 +6,7 @@
  * - 現在の view / speaker 状態を phase として保存する
  * - 保存済み phase を選択して読み込めるようにする
  * - localStorage へ永続化して、リロード後も phase を残す
+ * - phase ごとの durationMs を保持できるようにする
  */
 
 import { defineStore } from 'pinia'
@@ -26,6 +27,16 @@ import type { SpeakerSettings, SpeakerTypeVisibility } from '@/types/speaker'
  * localStorage 保存キー。
  */
 const PHASE_STORAGE_KEY = 'live-stage-3d-simulator:phases'
+
+/**
+ * 新規保存時のデフォルト再生時間。
+ */
+export const DEFAULT_PHASE_DURATION_MS = 3000
+
+/**
+ * 最小許容再生時間。
+ */
+const MIN_PHASE_DURATION_MS = 100
 
 /**
  * speaker 一覧を複製する。
@@ -68,6 +79,20 @@ function cloneSnapshot(snapshot: PhaseSnapshot): PhaseSnapshot {
       speakers: cloneSpeakers(snapshot.speaker.speakers),
     },
   }
+}
+
+/**
+ * durationMs を安全な値へ正規化する。
+ *
+ * @param durationMs 入力値
+ * @returns 正規化後の durationMs
+ */
+function normalizeDurationMs(durationMs: number): number {
+  if (Number.isNaN(durationMs)) {
+    return DEFAULT_PHASE_DURATION_MS
+  }
+
+  return Math.max(MIN_PHASE_DURATION_MS, Math.round(durationMs))
 }
 
 /**
@@ -154,16 +179,22 @@ export const usePhaseStore = defineStore('phase', {
       }
 
       try {
-        const parsed = JSON.parse(rawValue) as PhaseItem[]
+        const parsed = JSON.parse(rawValue) as Partial<PhaseItem>[]
 
         this.phases = Array.isArray(parsed)
-          ? parsed.map((phase) => ({
-              ...phase,
-              snapshot: cloneSnapshot(phase.snapshot),
+          ? parsed.map((phase, index) => ({
+              id: phase.id ?? `migrated-phase-${index + 1}`,
+              name: phase.name ?? `Phase ${index + 1}`,
+              createdAt: phase.createdAt ?? new Date().toISOString(),
+              durationMs: normalizeDurationMs(
+                typeof phase.durationMs === 'number' ? phase.durationMs : DEFAULT_PHASE_DURATION_MS,
+              ),
+              snapshot: cloneSnapshot(phase.snapshot as PhaseSnapshot),
             }))
           : []
 
         this.selectedPhaseId = this.phases[0]?.id ?? ''
+        this.persistToLocalStorage()
       } catch (error) {
         console.error('Failed to parse saved phases from localStorage.', error)
         this.phases = []
@@ -212,6 +243,7 @@ export const usePhaseStore = defineStore('phase', {
         id: createPhaseId(),
         name: resolvedName,
         createdAt: new Date().toISOString(),
+        durationMs: DEFAULT_PHASE_DURATION_MS,
         snapshot: this.createSnapshotFromCurrentState(),
       }
 
@@ -291,6 +323,40 @@ export const usePhaseStore = defineStore('phase', {
       this.persistToLocalStorage()
 
       return true
+    },
+
+    /**
+     * 指定 phase の durationMs を更新する。
+     *
+     * @param phaseId 対象 phase ID
+     * @param durationMs 新しい durationMs
+     * @returns 更新できたら true
+     */
+    updatePhaseDurationById(phaseId: string, durationMs: number): boolean {
+      const phase = this.phases.find((item) => item.id === phaseId)
+      if (!phase) {
+        return false
+      }
+
+      phase.durationMs = normalizeDurationMs(durationMs)
+      this.persistToLocalStorage()
+
+      return true
+    },
+
+    /**
+     * 選択中 phase の durationMs を更新する。
+     *
+     * @param durationMs 新しい durationMs
+     * @returns 更新できたら true
+     */
+    updateSelectedPhaseDuration(durationMs: number): boolean {
+      const phase = this.selectedPhase
+      if (!phase) {
+        return false
+      }
+
+      return this.updatePhaseDurationById(phase.id, durationMs)
     },
 
     /**

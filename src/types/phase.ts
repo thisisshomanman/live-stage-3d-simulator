@@ -1,6 +1,6 @@
 /**
  * ファイル概要:
- * - フェーズ保存に関する型定義を管理する
+ * - フェーズ保存 / 再生に関する型定義を管理する
  *
  * このファイルの目的:
  * - 現在の画面状態を phase snapshot として統一フォーマットで扱う
@@ -41,5 +41,6 @@ export interface PhaseItem {
   id: string
   name: string
   createdAt: string
+  durationMs: number
   snapshot: PhaseSnapshot
 }

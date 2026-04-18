@@ -11,19 +11,31 @@
  * 5. カメラプリセットの適用
  * 6. 自由視点との共存制御
  * 7. スピーカー表示状態の反映
- * 8. 後片付け
+ * 8. Raycast による選択判定
+ * 9. 後片付け
  */
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+
 import { createBaseSceneObjects, type BaseSceneObjects } from '@/core/scene/createBaseSceneObjects'
 import { VenueBuilder } from '@/core/scene/VenueBuilder'
 import { StageBuilder } from '@/core/scene/StageBuilder'
 import { SeatBlockBuilder } from '@/core/scene/SeatBlockBuilder'
 import { SpeakerBuilder } from '@/core/scene/SpeakerBuilder'
 import { findCameraPresetById } from '@/core/scene/cameraPresets'
+
 import type { CameraPresetId } from '@/types/view'
 import type { SpeakerSettings, SpeakerTypeVisibility } from '@/types/speaker'
+
+/**
+ * SceneManager から外側へ渡す選択結果。
+ */
+export interface SceneSelectionPayload {
+  objectId: string
+  objectType: 'speaker'
+  objectLabel: string
+}
 
 export class SceneManager {
   /**
@@ -51,7 +63,7 @@ export class SceneManager {
 
   /**
    * SpeakerBuilder を保持する。
-   * 後から表示ON/OFFを反映するために必要。
+   * 後から表示ON/OFFや選択対象管理を反映するために必要。
    */
   private speakerBuilder!: SpeakerBuilder
 
@@ -69,6 +81,29 @@ export class SceneManager {
    * ユーザーが手でカメラを動かしたことを外側へ通知するためのコールバック。
    */
   private onManualCameraControl?: () => void
+
+  /**
+   * 選択状態が変化したことを外側へ通知するためのコールバック。
+   */
+  private onSelectionChange?: (selection: SceneSelectionPayload | null) => void
+
+  /**
+   * Raycast 用オブジェクト。
+   */
+  private readonly raycaster = new THREE.Raycaster()
+  private readonly pointer = new THREE.Vector2()
+
+  /**
+   * Raycast 対象として扱うオブジェクト一覧。
+   * 現時点ではスピーカーのみを登録する。
+   */
+  private selectableObjects: THREE.Object3D[] = []
+
+  /**
+   * ドラッグとクリックを判定するための一時状態。
+   */
+  private pointerDownPosition: { x: number; y: number } | null = null
+  private didDragDuringPointer = false
 
   constructor(container: HTMLElement) {
     this.container = container
@@ -126,6 +161,15 @@ export class SceneManager {
   }
 
   /**
+   * 外側から、選択状態変更時の通知コールバックを登録する。
+   *
+   * @param callback 選択変更時に呼ぶ関数
+   */
+  public setOnSelectionChange(callback: (selection: SceneSelectionPayload | null) => void): void {
+    this.onSelectionChange = callback
+  }
+
+  /**
    * スピーカー表示状態を Scene に反映する。
    *
    * @param showSpeakers 全体表示ON/OFF
@@ -149,7 +193,6 @@ export class SceneManager {
    */
   public setCameraPreset(presetId: CameraPresetId): void {
     const preset = findCameraPresetById(presetId)
-
     if (!preset) {
       return
     }
@@ -157,9 +200,7 @@ export class SceneManager {
     this.isApplyingCameraPreset = true
 
     this.camera.position.set(preset.position.x, preset.position.y, preset.position.z)
-
     this.controls.target.set(preset.target.x, preset.target.y, preset.target.z)
-
     this.controls.update()
 
     this.currentPresetId = presetId
@@ -178,6 +219,14 @@ export class SceneManager {
    */
   public dispose(): void {
     window.removeEventListener('resize', this.handleResize)
+
+    if (this.renderer) {
+      this.renderer.domElement.removeEventListener('pointerdown', this.handlePointerDown)
+      this.renderer.domElement.removeEventListener('pointermove', this.handlePointerMove)
+      this.renderer.domElement.removeEventListener('pointerup', this.handlePointerUp)
+      this.renderer.domElement.removeEventListener('pointerleave', this.handlePointerLeave)
+    }
+
     cancelAnimationFrame(this.animationFrameId)
 
     if (this.controls) {
@@ -230,6 +279,11 @@ export class SceneManager {
     this.renderer.setSize(width, height)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
+    /**
+     * PointerEvent を扱いやすくするための設定。
+     */
+    this.renderer.domElement.style.touchAction = 'none'
+
     this.container.appendChild(this.renderer.domElement)
   }
 
@@ -238,7 +292,6 @@ export class SceneManager {
    */
   private createControls(): void {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
-
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.05
     this.controls.minDistance = 2
@@ -269,6 +322,11 @@ export class SceneManager {
 
     this.speakerBuilder = new SpeakerBuilder(this.scene)
     this.speakerBuilder.build()
+
+    /**
+     * 現時点の選択対象はスピーカーのみ。
+     */
+    this.selectableObjects = this.speakerBuilder.getSpeakerGroups()
   }
 
   /**
@@ -276,6 +334,10 @@ export class SceneManager {
    */
   private registerEvents(): void {
     window.addEventListener('resize', this.handleResize)
+    this.renderer.domElement.addEventListener('pointerdown', this.handlePointerDown)
+    this.renderer.domElement.addEventListener('pointermove', this.handlePointerMove)
+    this.renderer.domElement.addEventListener('pointerup', this.handlePointerUp)
+    this.renderer.domElement.addEventListener('pointerleave', this.handlePointerLeave)
   }
 
   /**
@@ -299,6 +361,144 @@ export class SceneManager {
 
     this.currentPresetId = 'free'
     this.onManualCameraControl?.()
+  }
+
+  /**
+   * PointerDown 時点の座標を保存する。
+   *
+   * @param event pointer event
+   */
+  private readonly handlePointerDown = (event: PointerEvent): void => {
+    this.pointerDownPosition = {
+      x: event.clientX,
+      y: event.clientY,
+    }
+    this.didDragDuringPointer = false
+  }
+
+  /**
+   * PointerMove 中にドラッグ発生を判定する。
+   *
+   * @param event pointer event
+   */
+  private readonly handlePointerMove = (event: PointerEvent): void => {
+    if (!this.pointerDownPosition) {
+      return
+    }
+
+    const deltaX = Math.abs(event.clientX - this.pointerDownPosition.x)
+    const deltaY = Math.abs(event.clientY - this.pointerDownPosition.y)
+
+    if (deltaX > 4 || deltaY > 4) {
+      this.didDragDuringPointer = true
+    }
+  }
+
+  /**
+   * PointerUp 時にクリックとして成立した場合のみ Raycast を実行する。
+   *
+   * @param event pointer event
+   */
+  private readonly handlePointerUp = (event: PointerEvent): void => {
+    if (!this.pointerDownPosition) {
+      return
+    }
+
+    if (this.didDragDuringPointer) {
+      this.resetPointerTracking()
+      return
+    }
+
+    const selection = this.pickSelectionFromPointer(event.clientX, event.clientY)
+    this.onSelectionChange?.(selection)
+
+    this.resetPointerTracking()
+  }
+
+  /**
+   * Pointer が canvas 外へ出た時に一時状態をリセットする。
+   */
+  private readonly handlePointerLeave = (): void => {
+    this.resetPointerTracking()
+  }
+
+  /**
+   * Pointer 判定用の一時状態をリセットする。
+   */
+  private resetPointerTracking(): void {
+    this.pointerDownPosition = null
+    this.didDragDuringPointer = false
+  }
+
+  /**
+   * 画面座標から Raycast を実行し、選択可能オブジェクトを返す。
+   *
+   * @param clientX pointer の X 座標
+   * @param clientY pointer の Y 座標
+   * @returns 選択結果。何もなければ null
+   */
+  private pickSelectionFromPointer(clientX: number, clientY: number): SceneSelectionPayload | null {
+    if (!this.camera || !this.renderer) {
+      return null
+    }
+
+    if (this.selectableObjects.length === 0) {
+      return null
+    }
+
+    const rect = this.renderer.domElement.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) {
+      return null
+    }
+
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1
+
+    this.raycaster.setFromCamera(this.pointer, this.camera)
+
+    const intersections = this.raycaster.intersectObjects(this.selectableObjects, true)
+
+    for (const intersection of intersections) {
+      const selectableObject = this.findSelectableAncestor(intersection.object)
+      if (!selectableObject) {
+        continue
+      }
+
+      const speakerId = selectableObject.userData?.speakerId
+      const speakerLabel = selectableObject.userData?.speakerLabel
+
+      if (typeof speakerId !== 'string' || typeof speakerLabel !== 'string') {
+        continue
+      }
+
+      return {
+        objectId: speakerId,
+        objectType: 'speaker',
+        objectLabel: speakerLabel,
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Raycast で当たったオブジェクトから、選択対象の親オブジェクトを探す。
+   *
+   * @param object 当たり判定されたオブジェクト
+   * @returns 選択対象の親オブジェクト。見つからなければ null
+   */
+  private findSelectableAncestor(object: THREE.Object3D | null): THREE.Object3D | null {
+    let currentObject: THREE.Object3D | null = object
+
+    while (currentObject) {
+      if (currentObject.userData?.type === 'speaker') {
+        return currentObject
+      }
+
+      currentObject = currentObject.parent
+    }
+
+    return null
   }
 
   /**

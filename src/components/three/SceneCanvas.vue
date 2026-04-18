@@ -1,124 +1,98 @@
 <template>
-  <section class="scene-canvas">
-    <!--
-      three.js の canvas を描画するためのコンテナ。
-      SceneManager が mounted 後にこの中へ canvas を追加する。
-    -->
-    <div ref="canvasContainer" class="scene-canvas__container"></div>
-  </section>
+  <div ref="sceneContainerRef" class="scene-canvas"></div>
 </template>
 
 <script setup lang="ts">
 /**
  * ファイル概要:
- * - three.js 描画の Vue 側入口となるコンポーネント
- * - three.js の詳細処理は SceneManager に委譲する
+ * - SceneManager を Vue コンポーネントとして画面にマウントする
  *
- * このファイルの責務:
- * 1. 描画コンテナを持つ
- * 2. mounted 時に SceneManager を初期化する
- * 3. unmounted 時に SceneManager を破棄する
- * 4. viewStore の変更を監視して、SceneManager のカメラ視点へ反映する
- * 5. 手動カメラ操作を検知して、viewStore を free に切り替える
- * 6. speakerStore の変更を監視して、スピーカー表示状態を反映する
+ * このファイルの目的:
+ * - Vue のライフサイクルと three.js の初期化 / 破棄をつなぐ
+ * - Pinia Store の状態変化を SceneManager へ反映する
+ * - Raycast の選択結果を selectionStore へ橋渡しする
  */
 
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { SceneManager } from '@/core/scene/SceneManager'
-import { useViewStore } from '@/stores/viewStore'
+
+import { SceneManager, type SceneSelectionPayload } from '@/core/scene/SceneManager'
 import { useSpeakerStore } from '@/stores/speakerStore'
+import { useViewStore } from '@/stores/viewStore'
+import { useSelectionStore } from '@/stores/selectionStore'
 
-/**
- * three.js 描画先の DOM 要素。
- */
-const canvasContainer = ref<HTMLElement | null>(null)
+const sceneContainerRef = ref<HTMLElement | null>(null)
 
-/**
- * three.js 全体を管理するクラス。
- */
 let sceneManager: SceneManager | null = null
 
-/**
- * 視点ストア。
- */
+const speakerStore = useSpeakerStore()
 const viewStore = useViewStore()
+const selectionStore = useSelectionStore()
+
+const { showSpeakers, typeVisibility, speakers } = storeToRefs(speakerStore)
 const { currentView } = storeToRefs(viewStore)
 
 /**
- * スピーカーストア。
+ * 現在の speakerStore 状態を SceneManager に反映する。
  */
-const speakerStore = useSpeakerStore()
-const { showSpeakers, typeVisibility, speakers } = storeToRefs(speakerStore)
-
-onMounted(() => {
-  if (!canvasContainer.value) return
-
-  sceneManager = new SceneManager(canvasContainer.value)
-
-  /**
-   * ユーザーが手動でカメラを動かした時は、
-   * Toolbar 側の表示も free に揃える。
-   */
-  sceneManager.setOnManualCameraControl(() => {
-    if (viewStore.currentView !== 'free') {
-      viewStore.setCurrentView('free')
-    }
-  })
-
-  sceneManager.init()
-
-  /**
-   * 初回マウント時にスピーカー表示状態を反映する。
-   */
-  sceneManager.applySpeakerState(showSpeakers.value, typeVisibility.value, speakers.value)
-
-  sceneManager.start()
-})
-
-/**
- * 視点変更を監視して、SceneManager のカメラへ反映する。
- */
-watch(currentView, (newPresetId) => {
-  if (!sceneManager) return
-
-  /**
-   * すでに同じ視点IDなら何もしない。
-   * これにより、手動操作で free に切り替わった時に
-   * カメラ位置が不必要にリセットされるのを防ぐ。
-   */
-  if (newPresetId === sceneManager.getCurrentPresetId()) {
+const syncSpeakerStateToScene = (): void => {
+  if (!sceneManager) {
     return
   }
 
-  sceneManager.setCameraPreset(newPresetId)
-})
+  sceneManager.applySpeakerState(showSpeakers.value, typeVisibility.value, speakers.value)
+}
 
 /**
- * スピーカー表示状態を監視して、SceneManager へ反映する。
+ * Raycast の選択結果を selectionStore に反映する。
  *
- * deep: true にする理由:
- * - typeVisibility オブジェクトの中身
- * - speakers 配列の中の各要素
- * の変更も検知したいため
+ * @param selection three.js 側から受け取った選択結果
  */
-watch(
-  () => ({
-    showSpeakers: showSpeakers.value,
-    typeVisibility: typeVisibility.value,
-    speakers: speakers.value,
-  }),
-  (state) => {
-    if (!sceneManager) return
+const syncSelectionToStore = (selection: SceneSelectionPayload | null): void => {
+  if (!selection) {
+    selectionStore.clearSelection()
+    return
+  }
 
-    sceneManager.applySpeakerState(state.showSpeakers, state.typeVisibility, state.speakers)
+  selectionStore.selectObject({
+    objectId: selection.objectId,
+    objectType: selection.objectType,
+    objectLabel: selection.objectLabel,
+  })
+}
+
+onMounted((): void => {
+  if (!sceneContainerRef.value) {
+    return
+  }
+
+  sceneManager = new SceneManager(sceneContainerRef.value)
+  sceneManager.init()
+
+  sceneManager.setOnManualCameraControl((): void => {
+    viewStore.setCurrentView('free')
+  })
+
+  sceneManager.setOnSelectionChange(syncSelectionToStore)
+
+  syncSpeakerStateToScene()
+  sceneManager.setCameraPreset(currentView.value)
+  sceneManager.start()
+})
+
+watch(currentView, (nextView): void => {
+  sceneManager?.setCameraPreset(nextView)
+})
+
+watch(
+  [showSpeakers, typeVisibility, speakers],
+  (): void => {
+    syncSpeakerStateToScene()
   },
-  {
-    deep: true,
-  },
+  { deep: true },
 )
 
-onUnmounted(() => {
+onBeforeUnmount((): void => {
   sceneManager?.dispose()
   sceneManager = null
 })
@@ -126,12 +100,6 @@ onUnmounted(() => {
 
 <style scoped>
 .scene-canvas {
-  min-width: 0;
-  min-height: 0;
-  background: #111;
-}
-
-.scene-canvas__container {
   width: 100%;
   height: 100%;
 }

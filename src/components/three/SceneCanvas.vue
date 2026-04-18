@@ -22,6 +22,7 @@
  * 5. 手動カメラ操作を検知して、viewStore を free に切り替える
  * 6. speakerStore の変更を監視して、スピーカー表示状態を反映する
  * 7. Raycast の選択結果を selectionStore に反映する
+ * 8. selectionStore の選択状態を監視して、3D ハイライトへ反映する
  */
 
 import { onMounted, onUnmounted, ref, watch } from 'vue'
@@ -57,6 +58,7 @@ const { showSpeakers, typeVisibility, speakers } = storeToRefs(speakerStore)
  * 選択状態ストア。
  */
 const selectionStore = useSelectionStore()
+const { selectedObjectId, selectedObjectType } = storeToRefs(selectionStore)
 
 /**
  * Raycast の選択結果を selectionStore に反映する。
@@ -72,6 +74,22 @@ const syncSelectionToStore = (selection: SceneSelectionPayload | null): void => 
   if (selection.objectType === 'speaker') {
     selectionStore.selectSpeaker(selection.objectId)
   }
+}
+
+/**
+ * 現在の selectionStore 状態を SceneManager のハイライト表示へ反映する。
+ */
+const syncSelectedSpeakerToScene = (): void => {
+  if (!sceneManager) {
+    return
+  }
+
+  const speakerId =
+    selectedObjectType.value === 'speaker' && selectedObjectId.value !== ''
+      ? selectedObjectId.value
+      : null
+
+  sceneManager.setSelectedSpeaker(speakerId)
 }
 
 onMounted(() => {
@@ -100,6 +118,11 @@ onMounted(() => {
    * 初回マウント時にスピーカー表示状態を反映する。
    */
   sceneManager.applySpeakerState(showSpeakers.value, typeVisibility.value, speakers.value)
+
+  /**
+   * 初期選択状態があれば 3D ハイライトへ反映する。
+   */
+  syncSelectedSpeakerToScene()
 
   sceneManager.start()
 })
@@ -145,6 +168,13 @@ watch(
     deep: true,
   },
 )
+
+/**
+ * 選択状態を監視して、3D 上のハイライトへ反映する。
+ */
+watch([selectedObjectId, selectedObjectType], () => {
+  syncSelectedSpeakerToScene()
+})
 
 onUnmounted(() => {
   sceneManager?.dispose()

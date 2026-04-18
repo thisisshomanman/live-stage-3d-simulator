@@ -7,6 +7,7 @@
  * - スピーカーの描画ロジックだけに集中させる
  * - 種別定義や配置定義は speakerCatalog.ts 側に集約する
  * - 生成済みスピーカーGroupを保持し、後から表示切替できるようにする
+ * - 選択中スピーカーのハイライト表示を制御する
  *
  * 現時点の方針:
  * - 見た目のリアルさより、位置関係と向きが分かることを優先する
@@ -23,17 +24,29 @@ import type {
 } from '@/types/speaker'
 
 /**
+ * ハイライト対象として扱う子オブジェクト種別。
+ */
+type HighlightRole = 'speaker-body' | 'speaker-front-panel' | 'speaker-direction-guide'
+
+/**
  * SpeakerBuilder:
  * - Scene にスピーカーオブジェクトを追加する
+ * - 選択中スピーカーのハイライト表示を管理する
  */
 export class SpeakerBuilder {
   private readonly scene: THREE.Scene
 
   /**
    * 生成したスピーカーGroupを ID 単位で保持する。
-   * 後から表示ON/OFFを切り替えるために使う。
+   * 後から表示ON/OFFやハイライト切替に使う。
    */
   private readonly speakerGroups = new Map<string, THREE.Group>()
+
+  /**
+   * 現在ハイライト中の speaker ID。
+   * 未選択時は null。
+   */
+  private highlightedSpeakerId: string | null = null
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -91,6 +104,19 @@ export class SpeakerBuilder {
   }
 
   /**
+   * 選択中 speaker を更新し、ハイライトを反映する。
+   *
+   * @param speakerId ハイライト対象 speaker ID。未選択時は null
+   */
+  public setHighlightedSpeaker(speakerId: string | null): void {
+    this.highlightedSpeakerId = speakerId
+
+    this.speakerGroups.forEach((speakerGroup, currentSpeakerId) => {
+      this.applyHighlightToSpeakerGroup(speakerGroup, currentSpeakerId === speakerId)
+    })
+  }
+
+  /**
    * スピーカー1台分の Group を生成して Scene に追加する。
    *
    * Group にする理由:
@@ -123,6 +149,7 @@ export class SpeakerBuilder {
       speakerType: placement.type,
       speakerTypeLabel: typeDefinition.label,
       speakerDescription: typeDefinition.description,
+      isHighlighted: false,
     }
 
     /**
@@ -163,6 +190,11 @@ export class SpeakerBuilder {
 
     this.scene.add(speakerGroup)
     this.speakerGroups.set(placement.id, speakerGroup)
+
+    /**
+     * 生成時点のハイライト状態も反映しておく。
+     */
+    this.applyHighlightToSpeakerGroup(speakerGroup, placement.id === this.highlightedSpeakerId)
   }
 
   /**
@@ -177,9 +209,19 @@ export class SpeakerBuilder {
 
     const material = new THREE.MeshStandardMaterial({
       color: colorHex,
+      emissive: 0x000000,
+      emissiveIntensity: 0,
     })
 
-    return new THREE.Mesh(geometry, material)
+    const mesh = new THREE.Mesh(geometry, material)
+
+    mesh.userData = {
+      highlightRole: 'speaker-body' satisfies HighlightRole,
+      baseEmissiveHex: material.emissive.getHex(),
+      baseEmissiveIntensity: material.emissiveIntensity,
+    }
+
+    return mesh
   }
 
   /**
@@ -197,9 +239,16 @@ export class SpeakerBuilder {
     const panelMaterial = new THREE.MeshStandardMaterial({
       color: 0xe5e7eb,
       emissive: 0x111111,
+      emissiveIntensity: 0,
     })
 
     const panelMesh = new THREE.Mesh(panelGeometry, panelMaterial)
+
+    panelMesh.userData = {
+      highlightRole: 'speaker-front-panel' satisfies HighlightRole,
+      baseEmissiveHex: panelMaterial.emissive.getHex(),
+      baseEmissiveIntensity: panelMaterial.emissiveIntensity,
+    }
 
     /**
      * 本体前面に少しだけ浮かせて配置する。
@@ -227,7 +276,101 @@ export class SpeakerBuilder {
       color: 0xffffff,
     })
 
-    return new THREE.Line(geometry, material)
+    const line = new THREE.Line(geometry, material)
+
+    line.userData = {
+      highlightRole: 'speaker-direction-guide' satisfies HighlightRole,
+      baseColorHex: material.color.getHex(),
+    }
+
+    return line
+  }
+
+  /**
+   * speaker Group に対してハイライト状態を反映する。
+   *
+   * @param speakerGroup 対象 speaker Group
+   * @param isHighlighted ハイライト状態
+   */
+  private applyHighlightToSpeakerGroup(speakerGroup: THREE.Group, isHighlighted: boolean): void {
+    speakerGroup.userData.isHighlighted = isHighlighted
+
+    /**
+     * 選択中だけ少しだけ大きくする。
+     * 位置を変えずに「今どれが選択中か」を見やすくするため。
+     */
+    const scale = isHighlighted ? 1.08 : 1
+    speakerGroup.scale.set(scale, scale, scale)
+
+    speakerGroup.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshStandardMaterial) {
+        this.applyMeshHighlight(object, isHighlighted)
+      }
+
+      if (object instanceof THREE.Line && object.material instanceof THREE.LineBasicMaterial) {
+        this.applyLineHighlight(object, isHighlighted)
+      }
+    })
+  }
+
+  /**
+   * Mesh に対してハイライト状態を反映する。
+   *
+   * @param mesh 対象メッシュ
+   * @param isHighlighted ハイライト状態
+   */
+  private applyMeshHighlight(mesh: THREE.Mesh, isHighlighted: boolean): void {
+    if (!(mesh.material instanceof THREE.MeshStandardMaterial)) {
+      return
+    }
+
+    const role = mesh.userData.highlightRole as HighlightRole | undefined
+    const baseEmissiveHex = Number(mesh.userData.baseEmissiveHex ?? 0x000000)
+    const baseEmissiveIntensity = Number(mesh.userData.baseEmissiveIntensity ?? 0)
+
+    if (!isHighlighted) {
+      mesh.material.emissive.setHex(baseEmissiveHex)
+      mesh.material.emissiveIntensity = baseEmissiveIntensity
+      return
+    }
+
+    switch (role) {
+      case 'speaker-body':
+        mesh.material.emissive.setHex(0x22c55e)
+        mesh.material.emissiveIntensity = 0.7
+        break
+
+      case 'speaker-front-panel':
+        mesh.material.emissive.setHex(0xfacc15)
+        mesh.material.emissiveIntensity = 1.1
+        break
+
+      default:
+        mesh.material.emissive.setHex(baseEmissiveHex)
+        mesh.material.emissiveIntensity = baseEmissiveIntensity
+        break
+    }
+  }
+
+  /**
+   * Line に対してハイライト状態を反映する。
+   *
+   * @param line 対象ライン
+   * @param isHighlighted ハイライト状態
+   */
+  private applyLineHighlight(line: THREE.Line, isHighlighted: boolean): void {
+    if (!(line.material instanceof THREE.LineBasicMaterial)) {
+      return
+    }
+
+    const baseColorHex = Number(line.userData.baseColorHex ?? 0xffffff)
+
+    if (!isHighlighted) {
+      line.material.color.setHex(baseColorHex)
+      return
+    }
+
+    line.material.color.setHex(0xfacc15)
   }
 
   /**

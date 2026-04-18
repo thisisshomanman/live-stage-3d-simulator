@@ -12,7 +12,8 @@
  * 6. 自由視点との共存制御
  * 7. スピーカー表示状態の反映
  * 8. Raycast による speaker 選択判定
- * 9. 後片付け
+ * 9. 選択中 speaker のハイライト表示
+ * 10. 後片付け
  */
 
 import * as THREE from 'three'
@@ -97,6 +98,11 @@ export class SceneManager {
   private selectableObjects: THREE.Object3D[] = []
 
   /**
+   * 現在ハイライト中の speaker ID。
+   */
+  private selectedSpeakerId: string | null = null
+
+  /**
    * ドラッグとクリックを判定するための一時状態。
    */
   private pointerDownPosition: { x: number; y: number } | null = null
@@ -164,6 +170,21 @@ export class SceneManager {
    */
   public setOnSelectionChange(callback: (selection: SceneSelectionPayload | null) => void): void {
     this.onSelectionChange = callback
+  }
+
+  /**
+   * 選択中 speaker を更新し、3D ハイライトへ反映する。
+   *
+   * @param speakerId 選択中 speaker ID。未選択時は null
+   */
+  public setSelectedSpeaker(speakerId: string | null): void {
+    this.selectedSpeakerId = speakerId
+
+    if (!this.speakerBuilder) {
+      return
+    }
+
+    this.speakerBuilder.setHighlightedSpeaker(speakerId)
   }
 
   /**
@@ -322,6 +343,11 @@ export class SceneManager {
      * 現時点の選択対象は speaker のみ。
      */
     this.selectableObjects = this.speakerBuilder.getSpeakerGroups()
+
+    /**
+     * 初期選択状態があれば反映する。
+     */
+    this.speakerBuilder.setHighlightedSpeaker(this.selectedSpeakerId)
   }
 
   /**
@@ -405,6 +431,13 @@ export class SceneManager {
     }
 
     const selection = this.pickSelectionFromPointer(event.clientX, event.clientY)
+
+    /**
+     * Scene 側でも即時にハイライト反映する。
+     * その後、外側の store 同期でも同じ状態が反映される。
+     */
+    this.setSelectedSpeaker(selection?.objectType === 'speaker' ? selection.objectId : null)
+
     this.onSelectionChange?.(selection)
 
     this.resetPointerTracking()

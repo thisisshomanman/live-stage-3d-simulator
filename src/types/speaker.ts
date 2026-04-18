@@ -5,7 +5,7 @@
  *
  * このファイルの目的:
  * - スピーカーの種類や位置情報の構造を統一する
- * - Builder / JSON / UI の間で同じ型を使えるようにする
+ * - Builder / Store / UI の間で同じ型を使えるようにする
  */
 
 export type SpeakerType = 'main' | 'sub' | 'delay'
@@ -43,9 +43,6 @@ export interface SpeakerRotation {
  * - main: メインスピーカー
  * - sub: サブウーファー
  * - delay: ディレイスピーカー
- *
- * defaultSize / defaultColorHex を持たせることで、
- * 種別ごとの共通設定をまとめて管理できる。
  */
 export interface SpeakerTypeDefinition {
   type: SpeakerType
@@ -70,4 +67,32 @@ export interface SpeakerPlacement {
   rotation?: SpeakerRotation
   sizeOverride?: Partial<SpeakerSize>
   colorHexOverride?: number
+}
+
+/**
+ * UI / Store 側で保持するスピーカー設定。
+ *
+ * 今回の目的:
+ * - 表示ON/OFF
+ * - gain / delayMs の保持
+ *
+ * まだ gain / delayMs は描画に直接使わないが、
+ * 今後の音響制御の土台として先に保持しておく。
+ */
+export interface SpeakerSettings {
+  id: string
+  label: string
+  type: SpeakerType
+  gain: number
+  delayMs: number
+  isVisible: boolean
+}
+
+/**
+ * 種別ごとの表示状態。
+ */
+export interface SpeakerTypeVisibility {
+  main: boolean
+  sub: boolean
+  delay: boolean
 }

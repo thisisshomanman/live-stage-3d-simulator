@@ -20,12 +20,14 @@
  * 3. unmounted 時に SceneManager を破棄する
  * 4. viewStore の変更を監視して、SceneManager のカメラ視点へ反映する
  * 5. 手動カメラ操作を検知して、viewStore を free に切り替える
+ * 6. speakerStore の変更を監視して、スピーカー表示状態を反映する
  */
 
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { SceneManager } from '@/core/scene/SceneManager'
 import { useViewStore } from '@/stores/viewStore'
+import { useSpeakerStore } from '@/stores/speakerStore'
 
 /**
  * three.js 描画先の DOM 要素。
@@ -43,6 +45,12 @@ let sceneManager: SceneManager | null = null
 const viewStore = useViewStore()
 const { currentView } = storeToRefs(viewStore)
 
+/**
+ * スピーカーストア。
+ */
+const speakerStore = useSpeakerStore()
+const { showSpeakers, typeVisibility, speakers } = storeToRefs(speakerStore)
+
 onMounted(() => {
   if (!canvasContainer.value) return
 
@@ -51,11 +59,6 @@ onMounted(() => {
   /**
    * ユーザーが手動でカメラを動かした時は、
    * Toolbar 側の表示も free に揃える。
-   *
-   * ポイント:
-   * - ここでは store だけを書き換える
-   * - SceneManager 側では、すでに currentPresetId を free に更新済み
-   * - そのため watch 側で二重にカメラリセットされない
    */
   sceneManager.setOnManualCameraControl(() => {
     if (viewStore.currentView !== 'free') {
@@ -64,6 +67,12 @@ onMounted(() => {
   })
 
   sceneManager.init()
+
+  /**
+   * 初回マウント時にスピーカー表示状態を反映する。
+   */
+  sceneManager.applySpeakerState(showSpeakers.value, typeVisibility.value, speakers.value)
+
   sceneManager.start()
 })
 
@@ -84,6 +93,30 @@ watch(currentView, (newPresetId) => {
 
   sceneManager.setCameraPreset(newPresetId)
 })
+
+/**
+ * スピーカー表示状態を監視して、SceneManager へ反映する。
+ *
+ * deep: true にする理由:
+ * - typeVisibility オブジェクトの中身
+ * - speakers 配列の中の各要素
+ * の変更も検知したいため
+ */
+watch(
+  () => ({
+    showSpeakers: showSpeakers.value,
+    typeVisibility: typeVisibility.value,
+    speakers: speakers.value,
+  }),
+  (state) => {
+    if (!sceneManager) return
+
+    sceneManager.applySpeakerState(state.showSpeakers, state.typeVisibility, state.speakers)
+  },
+  {
+    deep: true,
+  },
+)
 
 onUnmounted(() => {
   sceneManager?.dispose()

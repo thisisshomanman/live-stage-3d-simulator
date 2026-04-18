@@ -10,13 +10,8 @@
  * 4. リサイズ処理
  * 5. カメラプリセットの適用
  * 6. 自由視点との共存制御
- * 7. 後片付け
- *
- * 今後の拡張想定:
- * - SpeakerBuilder の詳細化
- * - Scene 内オブジェクト選択連携
- * - JSON ベースのレイアウト読込
- * - 自席位置の本格反映
+ * 7. スピーカー表示状態の反映
+ * 8. 後片付け
  */
 
 import * as THREE from 'three'
@@ -28,6 +23,7 @@ import { SeatBlockBuilder } from '@/core/scene/SeatBlockBuilder'
 import { SpeakerBuilder } from '@/core/scene/SpeakerBuilder'
 import { findCameraPresetById } from '@/core/scene/cameraPresets'
 import type { CameraPresetId } from '@/types/view'
+import type { SpeakerSettings, SpeakerTypeVisibility } from '@/types/speaker'
 
 export class SceneManager {
   /**
@@ -54,19 +50,23 @@ export class SceneManager {
   private baseObjects!: BaseSceneObjects
 
   /**
+   * SpeakerBuilder を保持する。
+   * 後から表示ON/OFFを反映するために必要。
+   */
+  private speakerBuilder!: SpeakerBuilder
+
+  /**
    * 現在適用中のカメラプリセットID。
    */
   private currentPresetId: CameraPresetId = 'foh'
 
   /**
    * カメラプリセット適用中かどうかを管理するフラグ。
-   * programmatic なカメラ更新と、ユーザーの手操作を区別するために使う。
    */
   private isApplyingCameraPreset = false
 
   /**
    * ユーザーが手でカメラを動かしたことを外側へ通知するためのコールバック。
-   * SceneCanvas から登録され、viewStore を free に切り替える用途で使う。
    */
   private onManualCameraControl?: () => void
 
@@ -126,6 +126,23 @@ export class SceneManager {
   }
 
   /**
+   * スピーカー表示状態を Scene に反映する。
+   *
+   * @param showSpeakers 全体表示ON/OFF
+   * @param typeVisibility 種別ごとの表示ON/OFF
+   * @param speakerSettings 個別スピーカー設定一覧
+   */
+  public applySpeakerState(
+    showSpeakers: boolean,
+    typeVisibility: SpeakerTypeVisibility,
+    speakerSettings: SpeakerSettings[],
+  ): void {
+    if (!this.speakerBuilder) return
+
+    this.speakerBuilder.applySpeakerVisibility(showSpeakers, typeVisibility, speakerSettings)
+  }
+
+  /**
    * カメラプリセットを適用する。
    *
    * @param presetId 適用したいカメラプリセットID
@@ -139,19 +156,10 @@ export class SceneManager {
 
     this.isApplyingCameraPreset = true
 
-    /**
-     * カメラ位置をプリセット定義へ合わせる。
-     */
     this.camera.position.set(preset.position.x, preset.position.y, preset.position.z)
 
-    /**
-     * OrbitControls の注視点をプリセット定義へ合わせる。
-     */
     this.controls.target.set(preset.target.x, preset.target.y, preset.target.z)
 
-    /**
-     * damping を使っているため、位置変更後にも update する。
-     */
     this.controls.update()
 
     this.currentPresetId = presetId
@@ -231,21 +239,10 @@ export class SceneManager {
   private createControls(): void {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
 
-    /**
-     * カメラ操作を少し滑らかにする設定。
-     */
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.05
-
-    /**
-     * ズーム距離の制限。
-     */
     this.controls.minDistance = 2
     this.controls.maxDistance = 30
-
-    /**
-     * 上下回転の制限。
-     */
     this.controls.maxPolarAngle = Math.PI / 2
 
     /**
@@ -270,8 +267,8 @@ export class SceneManager {
     const seatBlockBuilder = new SeatBlockBuilder(this.scene)
     seatBlockBuilder.build()
 
-    const speakerBuilder = new SpeakerBuilder(this.scene)
-    speakerBuilder.build()
+    this.speakerBuilder = new SpeakerBuilder(this.scene)
+    this.speakerBuilder.build()
   }
 
   /**
@@ -290,16 +287,6 @@ export class SceneManager {
 
   /**
    * OrbitControls による手動操作開始時の処理。
-   *
-   * ここでやっていること:
-   * - プリセット適用中のイベントなら無視
-   * - すでに free なら何もしない
-   * - それ以外なら内部状態を free に更新し、
-   *   外側へ「手動操作が始まった」と通知する
-   *
-   * この処理によって、
-   * FOH や User Seat から手でカメラを動かした時に、
-   * Toolbar 側の表示も Free に切り替えられる。
    */
   private readonly handleControlsStart = (): void => {
     if (this.isApplyingCameraPreset) {
@@ -320,9 +307,6 @@ export class SceneManager {
   private animate = (): void => {
     this.animationFrameId = requestAnimationFrame(this.animate)
 
-    /**
-     * 今は動作確認用のキューブを回転させる。
-     */
     this.baseObjects.cube.rotation.x += 0.01
     this.baseObjects.cube.rotation.y += 0.01
 

@@ -6,11 +6,7 @@
  * - SceneManager からスピーカー生成責務を分離する
  * - スピーカーの描画ロジックだけに集中させる
  * - 種別定義や配置定義は speakerCatalog.ts 側に集約する
- *
- * T-027 で追加したこと:
- * - スピーカー本体を Group 化
- * - 前面パネルを追加
- * - 向きがわかるガイドラインを追加
+ * - 生成済みスピーカーGroupを保持し、後から表示切替できるようにする
  *
  * 現時点の方針:
  * - 見た目のリアルさより、位置関係と向きが分かることを優先する
@@ -19,7 +15,12 @@
 
 import * as THREE from 'three'
 import { getSpeakerTypeDefinition, speakerPlacements } from '@/core/scene/speakerCatalog'
-import type { SpeakerPlacement, SpeakerSize } from '@/types/speaker'
+import type {
+  SpeakerPlacement,
+  SpeakerSettings,
+  SpeakerSize,
+  SpeakerTypeVisibility,
+} from '@/types/speaker'
 
 /**
  * SpeakerBuilder:
@@ -27,6 +28,12 @@ import type { SpeakerPlacement, SpeakerSize } from '@/types/speaker'
  */
 export class SpeakerBuilder {
   private readonly scene: THREE.Scene
+
+  /**
+   * 生成したスピーカーGroupを ID 単位で保持する。
+   * 後から表示ON/OFFを切り替えるために使う。
+   */
+  private readonly speakerGroups = new Map<string, THREE.Group>()
 
   constructor(scene: THREE.Scene) {
     this.scene = scene
@@ -39,6 +46,38 @@ export class SpeakerBuilder {
   public build(): void {
     speakerPlacements.forEach((speakerPlacement) => {
       this.createSpeakerGroup(speakerPlacement)
+    })
+  }
+
+  /**
+   * スピーカー表示状態を適用する。
+   *
+   * 表示判定条件:
+   * - 全体表示ON
+   * - 種別表示ON
+   * - 個別表示ON
+   *
+   * @param showSpeakers 全体表示ON/OFF
+   * @param typeVisibility 種別ごとの表示ON/OFF
+   * @param speakerSettings 個別スピーカー設定一覧
+   */
+  public applySpeakerVisibility(
+    showSpeakers: boolean,
+    typeVisibility: SpeakerTypeVisibility,
+    speakerSettings: SpeakerSettings[],
+  ): void {
+    const settingsMap = new Map(speakerSettings.map((speaker) => [speaker.id, speaker]))
+
+    this.speakerGroups.forEach((speakerGroup, speakerId) => {
+      const speakerSetting = settingsMap.get(speakerId)
+
+      if (!speakerSetting) {
+        speakerGroup.visible = false
+        return
+      }
+
+      speakerGroup.visible =
+        showSpeakers && typeVisibility[speakerSetting.type] && speakerSetting.isVisible
     })
   }
 
@@ -114,6 +153,7 @@ export class SpeakerBuilder {
     speakerGroup.rotation.y = THREE.MathUtils.degToRad(placement.rotation?.yDeg ?? 0)
 
     this.scene.add(speakerGroup)
+    this.speakerGroups.set(placement.id, speakerGroup)
   }
 
   /**
@@ -162,9 +202,6 @@ export class SpeakerBuilder {
 
   /**
    * スピーカーの向きガイドを生成する。
-   *
-   * 今回は、正面方向へ伸びる短いラインで表現する。
-   * Group の回転に追従するため、スピーカー本体のローカル座標で作成する。
    *
    * @param size スピーカーサイズ
    * @returns 向きガイドの Line

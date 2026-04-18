@@ -2,14 +2,18 @@
   <header class="toolbar">
     <div class="toolbar__left">
       <span class="toolbar__title">Live Stage 3D Simulator</span>
+      <span class="toolbar__phase-label">
+        Selected Phase:
+        <strong>{{ selectedPhaseName }}</strong>
+      </span>
     </div>
 
     <div class="toolbar__center">
-      <button>Load</button>
-      <button>Save</button>
-      <button>Play</button>
-      <button>Pause</button>
-      <button>Stop</button>
+      <button type="button" @click="handleLoadPhase" :disabled="!hasSelectedPhase">Load</button>
+      <button type="button" @click="handleSavePhase">Save</button>
+      <button type="button">Play</button>
+      <button type="button">Pause</button>
+      <button type="button">Stop</button>
     </div>
 
     <div class="toolbar__right">
@@ -34,51 +38,81 @@
  * - アプリ上部のツールバーを表示するコンポーネント
  *
  * このファイルの目的:
- * - 各種操作ボタン（将来拡張用）を表示する
+ * - 保存 / 読込などの主要操作ボタンを提供する
  * - 視点切替UIを提供する
- * - viewStore と接続して、選択中の視点を変更できるようにする
- *
- * 現時点では:
- * - View セレクトのみ、three.js のカメラと実際に連動する
- * - Load / Save / Play / Pause / Stop は見た目だけ
+ * - phaseStore と接続して phase の保存 / 読込を行えるようにする
  */
 
-import { computed } from 'vue'
-import { useViewStore } from '@/stores/viewStore'
+import { computed, onMounted } from 'vue'
+
 import { cameraPresets } from '@/core/scene/cameraPresets'
+import { usePhaseStore } from '@/stores/phaseStore'
+import { useViewStore } from '@/stores/viewStore'
+
 import type { CameraPresetId } from '@/types/view'
 
 /**
  * 視点ストア。
- * 現在の視点IDを保持している。
  */
 const viewStore = useViewStore()
 
 /**
+ * phase ストア。
+ */
+const phaseStore = usePhaseStore()
+
+/**
  * select 用の双方向バインディング。
- *
- * get:
- * - 現在の視点IDを返す
- *
- * set:
- * - select の変更を受けて store の currentView を更新する
- *
- * computed を使う理由:
- * - Pinia の state をそのまま v-model で扱うより、
- *   get / set を明示した方が読みやすく、責務も分かりやすい
  */
 const selectedView = computed({
   get: (): CameraPresetId => viewStore.currentView,
-  set: (value: CameraPresetId) => {
+  set: (value: CameraPresetId): void => {
     viewStore.setCurrentView(value)
   },
 })
+
+/**
+ * 現在選択中 phase 名を表示用に整形する。
+ */
+const selectedPhaseName = computed<string>(() => {
+  return phaseStore.selectedPhase?.name ?? 'None'
+})
+
+/**
+ * phase が選択されているかどうか。
+ */
+const hasSelectedPhase = computed<boolean>(() => phaseStore.hasSelectedPhase)
+
+onMounted(() => {
+  phaseStore.initialize()
+})
+
+/**
+ * 現在状態を phase として保存する。
+ */
+function handleSavePhase(): void {
+  const defaultName = `Phase ${phaseStore.phases.length + 1}`
+  const inputValue = window.prompt('保存する phase 名を入力してください。', defaultName)
+
+  if (inputValue === null) {
+    return
+  }
+
+  phaseStore.saveCurrentPhase(inputValue)
+}
+
+/**
+ * 選択中 phase を読み込む。
+ */
+function handleLoadPhase(): void {
+  phaseStore.loadSelectedPhase()
+}
 </script>
 
 <style scoped>
 /**
  * ツールバー全体。
- * 左: タイトル
+ * 左: タイトル / 選択中 phase
  * 中央: 操作ボタン
  * 右: 視点切替
  */
@@ -93,8 +127,24 @@ const selectedView = computed({
   background: #fff;
 }
 
+.toolbar__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
 .toolbar__title {
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.toolbar__phase-label {
+  font-size: 13px;
+  color: #555;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolbar__center {

@@ -5,15 +5,12 @@
  * このファイルの目的:
  * - 現在選択中の視点IDを保持する
  * - Toolbar の select と SceneCanvas の three.js カメラをつなぐ
- * - 今後、視点切替UIや視点保存機能を追加しやすくする
- *
- * 現時点では:
- * - currentView: 現在の視点ID
- * - availableViews: 利用可能な視点一覧
- * - setCurrentView(): 視点変更用の action
+ * - phase 読込時に視点状態を復元できるようにする
  */
 
 import { defineStore } from 'pinia'
+
+import type { PhaseViewSnapshot } from '@/types/phase'
 import type { CameraPresetId } from '@/types/view'
 
 export const useViewStore = defineStore('view', {
@@ -37,8 +34,17 @@ export const useViewStore = defineStore('view', {
      *
      * @param presetId 切り替えたい視点ID
      */
-    setCurrentView(presetId: CameraPresetId) {
+    setCurrentView(presetId: CameraPresetId): void {
       this.currentView = presetId
+    },
+
+    /**
+     * phase snapshot の view 情報を適用する。
+     *
+     * @param snapshot 適用対象 snapshot
+     */
+    applyPhaseViewSnapshot(snapshot: PhaseViewSnapshot): void {
+      this.currentView = snapshot.currentView
     },
   },
 })

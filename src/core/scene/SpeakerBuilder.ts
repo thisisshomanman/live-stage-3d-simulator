@@ -50,15 +50,6 @@ export class SpeakerBuilder {
   }
 
   /**
-   * Raycast の選択対象として扱うスピーカーGroup一覧を返す。
-   *
-   * @returns 選択可能なスピーカーGroup一覧
-   */
-  public getSpeakerGroups(): THREE.Group[] {
-    return Array.from(this.speakerGroups.values())
-  }
-
-  /**
    * スピーカー表示状態を適用する。
    *
    * 表示判定条件:
@@ -88,6 +79,15 @@ export class SpeakerBuilder {
       speakerGroup.visible =
         showSpeakers && typeVisibility[speakerSetting.type] && speakerSetting.isVisible
     })
+  }
+
+  /**
+   * Raycast の選択対象として扱うスピーカーGroup一覧を返す。
+   *
+   * @returns 選択可能なスピーカーGroup一覧
+   */
+  public getSpeakerGroups(): THREE.Group[] {
+    return Array.from(this.speakerGroups.values())
   }
 
   /**

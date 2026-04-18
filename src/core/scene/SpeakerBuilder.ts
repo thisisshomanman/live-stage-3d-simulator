@@ -7,9 +7,14 @@
  * - スピーカーの描画ロジックだけに集中させる
  * - 種別定義や配置定義は speakerCatalog.ts 側に集約する
  *
+ * T-027 で追加したこと:
+ * - スピーカー本体を Group 化
+ * - 前面パネルを追加
+ * - 向きがわかるガイドラインを追加
+ *
  * 現時点の方針:
- * - 見た目のリアルさより、位置関係と種別の違いが分かることを優先する
- * - 箱形オブジェクトで簡易的に表現する
+ * - 見た目のリアルさより、位置関係と向きが分かることを優先する
+ * - 箱形オブジェクト + 補助表現で簡易的に表現する
  */
 
 import * as THREE from 'three'
@@ -33,37 +38,37 @@ export class SpeakerBuilder {
    */
   public build(): void {
     speakerPlacements.forEach((speakerPlacement) => {
-      this.createSpeakerMesh(speakerPlacement)
+      this.createSpeakerGroup(speakerPlacement)
     })
   }
 
   /**
-   * スピーカー1台分のメッシュを生成して Scene に追加する。
+   * スピーカー1台分の Group を生成して Scene に追加する。
+   *
+   * Group にする理由:
+   * - 本体
+   * - 前面パネル
+   * - 向きガイド
+   * をまとめて回転・移動できるようにするため
    *
    * @param placement スピーカー配置定義
    */
-  private createSpeakerMesh(placement: SpeakerPlacement): void {
+  private createSpeakerGroup(placement: SpeakerPlacement): void {
     const typeDefinition = getSpeakerTypeDefinition(placement.type)
     const resolvedSize = this.resolveSpeakerSize(typeDefinition.defaultSize, placement.sizeOverride)
 
-    const geometry = new THREE.BoxGeometry(
-      resolvedSize.width,
-      resolvedSize.height,
-      resolvedSize.depth,
-    )
-
-    const material = new THREE.MeshStandardMaterial({
-      color: placement.colorHexOverride ?? typeDefinition.defaultColorHex,
-    })
-
-    const mesh = new THREE.Mesh(geometry, material)
+    /**
+     * スピーカー1台分をまとめる親 Group。
+     * rotation はこの Group に対して適用する。
+     */
+    const speakerGroup = new THREE.Group()
 
     /**
      * 将来の選択機能やプロパティ表示に備えて、
-     * name と userData に情報を持たせておく。
+     * Group 側に name / userData を持たせる。
      */
-    mesh.name = placement.id
-    mesh.userData = {
+    speakerGroup.name = placement.id
+    speakerGroup.userData = {
       type: 'speaker',
       speakerId: placement.id,
       speakerLabel: placement.label,
@@ -72,15 +77,111 @@ export class SpeakerBuilder {
       speakerDescription: typeDefinition.description,
     }
 
-    mesh.position.set(placement.position.x, placement.position.y, placement.position.z)
+    /**
+     * スピーカー本体を追加。
+     */
+    const bodyMesh = this.createSpeakerBody(
+      resolvedSize,
+      placement.colorHexOverride ?? typeDefinition.defaultColorHex,
+    )
+    speakerGroup.add(bodyMesh)
+
+    /**
+     * 前面パネルを追加。
+     * 箱だけだと向きが分かりにくいので、
+     * 「どちらが正面か」が見える薄い板を前面に置く。
+     */
+    const frontPanelMesh = this.createFrontPanel(resolvedSize)
+    speakerGroup.add(frontPanelMesh)
+
+    /**
+     * 向きガイドを追加。
+     * スピーカー正面方向へ少し伸びる線を付けることで、
+     * rotation の向きが視覚的に分かりやすくなる。
+     */
+    const directionGuide = this.createDirectionGuide(resolvedSize)
+    speakerGroup.add(directionGuide)
+
+    /**
+     * Group 全体の位置を設定。
+     */
+    speakerGroup.position.set(placement.position.x, placement.position.y, placement.position.z)
 
     /**
      * rotation は度数法で定義しているため、
      * three.js 用にラジアンへ変換する。
      */
-    mesh.rotation.y = THREE.MathUtils.degToRad(placement.rotation?.yDeg ?? 0)
+    speakerGroup.rotation.y = THREE.MathUtils.degToRad(placement.rotation?.yDeg ?? 0)
 
-    this.scene.add(mesh)
+    this.scene.add(speakerGroup)
+  }
+
+  /**
+   * スピーカー本体メッシュを生成する。
+   *
+   * @param size 最終サイズ
+   * @param colorHex 本体色
+   * @returns スピーカー本体メッシュ
+   */
+  private createSpeakerBody(size: SpeakerSize, colorHex: number): THREE.Mesh {
+    const geometry = new THREE.BoxGeometry(size.width, size.height, size.depth)
+
+    const material = new THREE.MeshStandardMaterial({
+      color: colorHex,
+    })
+
+    return new THREE.Mesh(geometry, material)
+  }
+
+  /**
+   * スピーカー前面パネルを生成する。
+   *
+   * 前面は +Z 側として扱う。
+   * 本体前面に薄い板を置いて、向きを見やすくする。
+   *
+   * @param size スピーカーサイズ
+   * @returns 前面パネルメッシュ
+   */
+  private createFrontPanel(size: SpeakerSize): THREE.Mesh {
+    const panelGeometry = new THREE.BoxGeometry(size.width * 0.72, size.height * 0.72, 0.05)
+
+    const panelMaterial = new THREE.MeshStandardMaterial({
+      color: 0xe5e7eb,
+      emissive: 0x111111,
+    })
+
+    const panelMesh = new THREE.Mesh(panelGeometry, panelMaterial)
+
+    /**
+     * 本体前面に少しだけ浮かせて配置する。
+     */
+    panelMesh.position.set(0, 0, size.depth / 2 + 0.04)
+
+    return panelMesh
+  }
+
+  /**
+   * スピーカーの向きガイドを生成する。
+   *
+   * 今回は、正面方向へ伸びる短いラインで表現する。
+   * Group の回転に追従するため、スピーカー本体のローカル座標で作成する。
+   *
+   * @param size スピーカーサイズ
+   * @returns 向きガイドの Line
+   */
+  private createDirectionGuide(size: SpeakerSize): THREE.Line {
+    const points = [
+      new THREE.Vector3(0, 0, size.depth / 2 + 0.08),
+      new THREE.Vector3(0, 0, size.depth / 2 + 0.9),
+    ]
+
+    const geometry = new THREE.BufferGeometry().setFromPoints(points)
+
+    const material = new THREE.LineBasicMaterial({
+      color: 0xffffff,
+    })
+
+    return new THREE.Line(geometry, material)
   }
 
   /**

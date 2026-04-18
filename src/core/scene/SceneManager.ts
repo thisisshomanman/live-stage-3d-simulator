@@ -21,6 +21,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createBaseSceneObjects, type BaseSceneObjects } from '@/core/scene/createBaseSceneObjects'
 import { VenueBuilder } from '@/core/scene/VenueBuilder'
+import { StageBuilder } from '@/core/scene/StageBuilder'
 
 export class SceneManager {
   /**
@@ -190,12 +191,16 @@ export class SceneManager {
    * Scene に表示用オブジェクトを追加する。
    * - 基本補助オブジェクト
    * - 会場オブジェクト
+   * - ステージオブジェクト
    */
   private createObjects(): void {
     this.baseObjects = createBaseSceneObjects(this.scene)
 
     const venueBuilder = new VenueBuilder(this.scene)
     venueBuilder.build()
+
+    const stageBuilder = new StageBuilder(this.scene)
+    stageBuilder.build()
   }
 
   /**

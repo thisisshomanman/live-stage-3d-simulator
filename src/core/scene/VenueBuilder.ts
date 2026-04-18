@@ -4,12 +4,12 @@
  * - 現段階では、以下の簡易オブジェクトを生成する
  *   1. 会場の床
  *   2. 会場の壁（背面 / 左 / 右）
- *   3. メインステージ
- *   4. 客席ブロック（左 / 中央 / 右）
+ *   3. 客席ブロック（左 / 中央 / 右）
  *
  * このファイルの目的:
  * - SceneManager から「会場をどう作るか」の責務を分離する
- * - 今後、ステージ詳細化やスピーカー配置追加をしやすくする
+ * - ステージ生成責務は StageBuilder へ分離済み
+ * - 今後、会場テンプレートや JSON 読み込みへ拡張しやすくする
  *
  * 方針:
  * - まずは正確な会場モデリングではなく、位置関係が分かる簡易表現を優先する
@@ -26,9 +26,6 @@ export interface VenueLayoutConfig {
   venueWidth: number
   venueDepth: number
   wallHeight: number
-  stageWidth: number
-  stageDepth: number
-  stageHeight: number
 }
 
 /**
@@ -51,14 +48,10 @@ export class VenueBuilder {
       venueWidth: 20,
       venueDepth: 28,
       wallHeight: 8,
-      stageWidth: 8,
-      stageDepth: 3,
-      stageHeight: 1,
     }
 
     this.createFloor(layout)
     this.createWalls(layout)
-    this.createStage(layout)
     this.createSeatBlocks()
   }
 
@@ -68,6 +61,7 @@ export class VenueBuilder {
    */
   private createFloor(layout: VenueLayoutConfig): void {
     const floorGeometry = new THREE.BoxGeometry(layout.venueWidth, 0.2, layout.venueDepth)
+
     const floorMaterial = new THREE.MeshStandardMaterial({
       color: 0x2a2a2a,
     })
@@ -104,35 +98,6 @@ export class VenueBuilder {
     const rightWall = new THREE.Mesh(sideWallGeometry, wallMaterial)
     rightWall.position.set(layout.venueWidth / 2, layout.wallHeight / 2, 0)
     this.scene.add(rightWall)
-  }
-
-  /**
-   * メインステージを作成する。
-   * 会場奥側に配置する。
-   */
-  private createStage(layout: VenueLayoutConfig): void {
-    const stageGeometry = new THREE.BoxGeometry(
-      layout.stageWidth,
-      layout.stageHeight,
-      layout.stageDepth,
-    )
-    const stageMaterial = new THREE.MeshStandardMaterial({
-      color: 0x5c5c5c,
-    })
-
-    const stage = new THREE.Mesh(stageGeometry, stageMaterial)
-
-    /**
-     * ステージは会場奥に寄せる。
-     * z はマイナス方向を奥として扱う。
-     */
-    stage.position.set(
-      0,
-      layout.stageHeight / 2,
-      -layout.venueDepth / 2 + layout.stageDepth / 2 + 1,
-    )
-
-    this.scene.add(stage)
   }
 
   /**

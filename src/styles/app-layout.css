@@ -1,0 +1,45 @@
+.app {
+  display: grid;
+  grid-template-rows: 56px 1fr 120px;
+  height: 100vh;
+}
+
+.toolbar {
+  border-bottom: 1px solid #ccc;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-weight: bold;
+}
+
+.main {
+  display: grid;
+  grid-template-columns: 220px 1fr 280px;
+  min-height: 0;
+}
+
+.left-panel,
+.right-panel,
+.scene,
+.timeline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.left-panel {
+  border-right: 1px solid #ccc;
+}
+
+.right-panel {
+  border-left: 1px solid #ccc;
+}
+
+.scene {
+  background: #111;
+  color: #fff;
+}
+
+.timeline {
+  border-top: 1px solid #ccc;
+}

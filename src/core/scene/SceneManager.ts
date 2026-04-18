@@ -22,6 +22,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createBaseSceneObjects, type BaseSceneObjects } from '@/core/scene/createBaseSceneObjects'
 import { VenueBuilder } from '@/core/scene/VenueBuilder'
 import { StageBuilder } from '@/core/scene/StageBuilder'
+import { SeatBlockBuilder } from '@/core/scene/SeatBlockBuilder'
 
 export class SceneManager {
   /**
@@ -192,6 +193,7 @@ export class SceneManager {
    * - 基本補助オブジェクト
    * - 会場オブジェクト
    * - ステージオブジェクト
+   * - 客席ブロック
    */
   private createObjects(): void {
     this.baseObjects = createBaseSceneObjects(this.scene)
@@ -201,6 +203,9 @@ export class SceneManager {
 
     const stageBuilder = new StageBuilder(this.scene)
     stageBuilder.build()
+
+    const seatBlockBuilder = new SeatBlockBuilder(this.scene)
+    seatBlockBuilder.build()
   }
 
   /**

@@ -4,11 +4,11 @@
  * - 現段階では、以下の簡易オブジェクトを生成する
  *   1. 会場の床
  *   2. 会場の壁（背面 / 左 / 右）
- *   3. 客席ブロック（左 / 中央 / 右）
  *
  * このファイルの目的:
  * - SceneManager から「会場をどう作るか」の責務を分離する
  * - ステージ生成責務は StageBuilder へ分離済み
+ * - 客席生成責務は SeatBlockBuilder へ分離済み
  * - 今後、会場テンプレートや JSON 読み込みへ拡張しやすくする
  *
  * 方針:
@@ -52,7 +52,6 @@ export class VenueBuilder {
 
     this.createFloor(layout)
     this.createWalls(layout)
-    this.createSeatBlocks()
   }
 
   /**
@@ -98,52 +97,5 @@ export class VenueBuilder {
     const rightWall = new THREE.Mesh(sideWallGeometry, wallMaterial)
     rightWall.position.set(layout.venueWidth / 2, layout.wallHeight / 2, 0)
     this.scene.add(rightWall)
-  }
-
-  /**
-   * 客席ブロックを簡易的に配置する。
-   * 左 / 中央 / 右の3ブロックに分けて、会場らしい見た目を作る。
-   */
-  private createSeatBlocks(): void {
-    const seatMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4b5563,
-      transparent: true,
-      opacity: 0.9,
-    })
-
-    const blocks = [
-      {
-        width: 4,
-        height: 1.2,
-        depth: 10,
-        x: -5,
-        y: 0.6,
-        z: 4,
-      },
-      {
-        width: 4.5,
-        height: 1.2,
-        depth: 12,
-        x: 0,
-        y: 0.6,
-        z: 3,
-      },
-      {
-        width: 4,
-        height: 1.2,
-        depth: 10,
-        x: 5,
-        y: 0.6,
-        z: 4,
-      },
-    ]
-
-    blocks.forEach((block) => {
-      const geometry = new THREE.BoxGeometry(block.width, block.height, block.depth)
-      const seatBlock = new THREE.Mesh(geometry, seatMaterial)
-
-      seatBlock.position.set(block.x, block.y, block.z)
-      this.scene.add(seatBlock)
-    })
   }
 }

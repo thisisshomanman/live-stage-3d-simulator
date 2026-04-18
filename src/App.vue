@@ -13,11 +13,11 @@
 </template>
 
 <script setup lang="ts">
-import Toolbar from './components/layout/Toolbar.vue'
-import ProjectPanel from './components/layout/ProjectPanel.vue'
-import PropertyPanel from './components/layout/PropertyPanel.vue'
-import TimelinePanel from './components/layout/TimelinePanel.vue'
-import SceneCanvas from './components/three/SceneCanvas.vue'
+import Toolbar from '@/components/layout/Toolbar.vue'
+import ProjectPanel from '@/components/layout/ProjectPanel.vue'
+import PropertyPanel from '@/components/layout/PropertyPanel.vue'
+import TimelinePanel from '@/components/layout/TimelinePanel.vue'
+import SceneCanvas from '@/components/three/SceneCanvas.vue'
 
-import './styles/app-layout.css'
+import '@/styles/app-layout.css'
 </script>

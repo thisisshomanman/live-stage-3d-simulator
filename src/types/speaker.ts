@@ -20,16 +20,54 @@ export interface SpeakerPosition {
 }
 
 /**
- * スピーカー1台分の定義。
+ * スピーカーのサイズ情報。
  */
-export interface SpeakerDefinition {
-  id: string
-  label: string
-  type: SpeakerType
+export interface SpeakerSize {
   width: number
   height: number
   depth: number
+}
+
+/**
+ * スピーカーの向き情報。
+ * 現時点では Y 軸回転のみ使う。
+ */
+export interface SpeakerRotation {
+  yDeg: number
+}
+
+/**
+ * スピーカー種別そのものの定義。
+ *
+ * 例:
+ * - main: メインスピーカー
+ * - sub: サブウーファー
+ * - delay: ディレイスピーカー
+ *
+ * defaultSize / defaultColorHex を持たせることで、
+ * 種別ごとの共通設定をまとめて管理できる。
+ */
+export interface SpeakerTypeDefinition {
+  type: SpeakerType
+  label: string
+  description: string
+  defaultSize: SpeakerSize
+  defaultColorHex: number
+}
+
+/**
+ * 会場内に配置されるスピーカー1台分の定義。
+ *
+ * ポイント:
+ * - 種別は type で参照する
+ * - サイズや色は必要なら override できる
+ */
+export interface SpeakerPlacement {
+  id: string
+  label: string
+  type: SpeakerType
   position: SpeakerPosition
-  rotationYDeg?: number
-  colorHex?: number
+  rotation?: SpeakerRotation
+  sizeOverride?: Partial<SpeakerSize>
+  colorHexOverride?: number
 }

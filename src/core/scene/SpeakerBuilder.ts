@@ -1,23 +1,20 @@
 /**
  * ファイル概要:
  * - ライブ会場内のスピーカーを生成するビルダー
- * - 現段階では、以下の簡易オブジェクトを配置する
- *   1. メインスピーカー 左
- *   2. メインスピーカー 右
- *   3. サブウーファー 左
- *   4. サブウーファー 右
  *
  * このファイルの目的:
  * - SceneManager からスピーカー生成責務を分離する
- * - 今後、delay speaker や line array 風表現、JSON読み込みへ拡張しやすくする
+ * - スピーカーの描画ロジックだけに集中させる
+ * - 種別定義や配置定義は speakerCatalog.ts 側に集約する
  *
  * 現時点の方針:
- * - 見た目のリアルさより、位置関係が分かることを優先する
+ * - 見た目のリアルさより、位置関係と種別の違いが分かることを優先する
  * - 箱形オブジェクトで簡易的に表現する
  */
 
 import * as THREE from 'three'
-import type { SpeakerDefinition } from '@/types/speaker'
+import { getSpeakerTypeDefinition, speakerPlacements } from '@/core/scene/speakerCatalog'
+import type { SpeakerPlacement, SpeakerSize } from '@/types/speaker'
 
 /**
  * SpeakerBuilder:
@@ -32,86 +29,31 @@ export class SpeakerBuilder {
 
   /**
    * スピーカーをまとめて生成する。
+   * 定義済みの配置一覧を順に Scene へ追加する。
    */
   public build(): void {
-    const speakers: SpeakerDefinition[] = [
-      {
-        id: 'sp-main-l',
-        label: 'Main Speaker Left',
-        type: 'main',
-        width: 0.8,
-        height: 2.6,
-        depth: 0.8,
-        position: {
-          x: -4.8,
-          y: 2.3,
-          z: -11.2,
-        },
-        rotationYDeg: 12,
-        colorHex: 0x2563eb,
-      },
-      {
-        id: 'sp-main-r',
-        label: 'Main Speaker Right',
-        type: 'main',
-        width: 0.8,
-        height: 2.6,
-        depth: 0.8,
-        position: {
-          x: 4.8,
-          y: 2.3,
-          z: -11.2,
-        },
-        rotationYDeg: -12,
-        colorHex: 0x2563eb,
-      },
-      {
-        id: 'sp-sub-l',
-        label: 'Subwoofer Left',
-        type: 'sub',
-        width: 1.4,
-        height: 1,
-        depth: 1.2,
-        position: {
-          x: -2.4,
-          y: 0.5,
-          z: -9.8,
-        },
-        rotationYDeg: 0,
-        colorHex: 0xf59e0b,
-      },
-      {
-        id: 'sp-sub-r',
-        label: 'Subwoofer Right',
-        type: 'sub',
-        width: 1.4,
-        height: 1,
-        depth: 1.2,
-        position: {
-          x: 2.4,
-          y: 0.5,
-          z: -9.8,
-        },
-        rotationYDeg: 0,
-        colorHex: 0xf59e0b,
-      },
-    ]
-
-    speakers.forEach((speaker) => {
-      this.createSpeakerMesh(speaker)
+    speakerPlacements.forEach((speakerPlacement) => {
+      this.createSpeakerMesh(speakerPlacement)
     })
   }
 
   /**
    * スピーカー1台分のメッシュを生成して Scene に追加する。
    *
-   * @param speaker スピーカー定義
+   * @param placement スピーカー配置定義
    */
-  private createSpeakerMesh(speaker: SpeakerDefinition): void {
-    const geometry = new THREE.BoxGeometry(speaker.width, speaker.height, speaker.depth)
+  private createSpeakerMesh(placement: SpeakerPlacement): void {
+    const typeDefinition = getSpeakerTypeDefinition(placement.type)
+    const resolvedSize = this.resolveSpeakerSize(typeDefinition.defaultSize, placement.sizeOverride)
+
+    const geometry = new THREE.BoxGeometry(
+      resolvedSize.width,
+      resolvedSize.height,
+      resolvedSize.depth,
+    )
 
     const material = new THREE.MeshStandardMaterial({
-      color: speaker.colorHex ?? 0x6b7280,
+      color: placement.colorHexOverride ?? typeDefinition.defaultColorHex,
     })
 
     const mesh = new THREE.Mesh(geometry, material)
@@ -120,21 +62,42 @@ export class SpeakerBuilder {
      * 将来の選択機能やプロパティ表示に備えて、
      * name と userData に情報を持たせておく。
      */
-    mesh.name = speaker.id
+    mesh.name = placement.id
     mesh.userData = {
       type: 'speaker',
-      speakerId: speaker.id,
-      speakerLabel: speaker.label,
-      speakerType: speaker.type,
+      speakerId: placement.id,
+      speakerLabel: placement.label,
+      speakerType: placement.type,
+      speakerTypeLabel: typeDefinition.label,
+      speakerDescription: typeDefinition.description,
     }
 
-    mesh.position.set(speaker.position.x, speaker.position.y, speaker.position.z)
+    mesh.position.set(placement.position.x, placement.position.y, placement.position.z)
 
     /**
-     * rotationYDeg は度数法で定義しているため、three.js 用にラジアンへ変換する。
+     * rotation は度数法で定義しているため、
+     * three.js 用にラジアンへ変換する。
      */
-    mesh.rotation.y = THREE.MathUtils.degToRad(speaker.rotationYDeg ?? 0)
+    mesh.rotation.y = THREE.MathUtils.degToRad(placement.rotation?.yDeg ?? 0)
 
     this.scene.add(mesh)
+  }
+
+  /**
+   * 種別の標準サイズと、個別上書き設定をマージして最終サイズを作る。
+   *
+   * @param defaultSize 種別の標準サイズ
+   * @param sizeOverride 個別上書きサイズ
+   * @returns 実際に使うサイズ
+   */
+  private resolveSpeakerSize(
+    defaultSize: SpeakerSize,
+    sizeOverride?: Partial<SpeakerSize>,
+  ): SpeakerSize {
+    return {
+      width: sizeOverride?.width ?? defaultSize.width,
+      height: sizeOverride?.height ?? defaultSize.height,
+      depth: sizeOverride?.depth ?? defaultSize.depth,
+    }
   }
 }

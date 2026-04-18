@@ -11,20 +11,18 @@
  * 5. カメラプリセットの適用
  * 6. 自由視点との共存制御
  * 7. スピーカー表示状態の反映
- * 8. Raycast による選択判定
+ * 8. Raycast による speaker 選択判定
  * 9. 後片付け
  */
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-
 import { createBaseSceneObjects, type BaseSceneObjects } from '@/core/scene/createBaseSceneObjects'
 import { VenueBuilder } from '@/core/scene/VenueBuilder'
 import { StageBuilder } from '@/core/scene/StageBuilder'
 import { SeatBlockBuilder } from '@/core/scene/SeatBlockBuilder'
 import { SpeakerBuilder } from '@/core/scene/SpeakerBuilder'
 import { findCameraPresetById } from '@/core/scene/cameraPresets'
-
 import type { CameraPresetId } from '@/types/view'
 import type { SpeakerSettings, SpeakerTypeVisibility } from '@/types/speaker'
 
@@ -34,7 +32,6 @@ import type { SpeakerSettings, SpeakerTypeVisibility } from '@/types/speaker'
 export interface SceneSelectionPayload {
   objectId: string
   objectType: 'speaker'
-  objectLabel: string
 }
 
 export class SceneManager {
@@ -83,7 +80,7 @@ export class SceneManager {
   private onManualCameraControl?: () => void
 
   /**
-   * 選択状態が変化したことを外側へ通知するためのコールバック。
+   * 選択状態の変化を外側へ通知するためのコールバック。
    */
   private onSelectionChange?: (selection: SceneSelectionPayload | null) => void
 
@@ -94,8 +91,8 @@ export class SceneManager {
   private readonly pointer = new THREE.Vector2()
 
   /**
-   * Raycast 対象として扱うオブジェクト一覧。
-   * 現時点ではスピーカーのみを登録する。
+   * Raycast 対象の一覧。
+   * 現時点では speaker Group のみを登録する。
    */
   private selectableObjects: THREE.Object3D[] = []
 
@@ -193,6 +190,7 @@ export class SceneManager {
    */
   public setCameraPreset(presetId: CameraPresetId): void {
     const preset = findCameraPresetById(presetId)
+
     if (!preset) {
       return
     }
@@ -278,10 +276,6 @@ export class SceneManager {
     this.renderer = new THREE.WebGLRenderer({ antialias: true })
     this.renderer.setSize(width, height)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-
-    /**
-     * PointerEvent を扱いやすくするための設定。
-     */
     this.renderer.domElement.style.touchAction = 'none'
 
     this.container.appendChild(this.renderer.domElement)
@@ -292,6 +286,7 @@ export class SceneManager {
    */
   private createControls(): void {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
+
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.05
     this.controls.minDistance = 2
@@ -324,7 +319,7 @@ export class SceneManager {
     this.speakerBuilder.build()
 
     /**
-     * 現時点の選択対象はスピーカーのみ。
+     * 現時点の選択対象は speaker のみ。
      */
     this.selectableObjects = this.speakerBuilder.getSpeakerGroups()
   }
@@ -465,16 +460,13 @@ export class SceneManager {
       }
 
       const speakerId = selectableObject.userData?.speakerId
-      const speakerLabel = selectableObject.userData?.speakerLabel
-
-      if (typeof speakerId !== 'string' || typeof speakerLabel !== 'string') {
+      if (typeof speakerId !== 'string') {
         continue
       }
 
       return {
         objectId: speakerId,
         objectType: 'speaker',
-        objectLabel: speakerLabel,
       }
     }
 

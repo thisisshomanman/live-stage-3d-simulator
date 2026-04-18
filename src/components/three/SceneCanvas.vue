@@ -18,10 +18,13 @@
  * 1. 描画コンテナを持つ
  * 2. mounted 時に SceneManager を初期化する
  * 3. unmounted 時に SceneManager を破棄する
+ * 4. viewStore の変更を監視して、SceneManager のカメラ視点へ反映する
  */
 
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { SceneManager } from '@/core/scene/SceneManager'
+import { useViewStore } from '@/stores/viewStore'
 
 /**
  * three.js 描画先の DOM 要素。
@@ -34,12 +37,37 @@ const canvasContainer = ref<HTMLElement | null>(null)
  */
 let sceneManager: SceneManager | null = null
 
+/**
+ * 視点ストア。
+ * Toolbar 側で currentView が変わると、ここでも反映される。
+ */
+const viewStore = useViewStore()
+
+/**
+ * storeToRefs を使うことで、Pinia の state を watch しやすい ref に変換する。
+ */
+const { currentView } = storeToRefs(viewStore)
+
 onMounted(() => {
   if (!canvasContainer.value) return
 
   sceneManager = new SceneManager(canvasContainer.value)
   sceneManager.init()
   sceneManager.start()
+})
+
+/**
+ * 視点変更を監視して、SceneManager のカメラへ反映する。
+ *
+ * ポイント:
+ * - immediate: false にしているため、初回マウント時は SceneManager.init() 側の
+ *   初期プリセット適用を使う
+ * - Toolbar 側で currentView が変わった時だけ、ここが発火する
+ */
+watch(currentView, (newPresetId) => {
+  if (!sceneManager) return
+
+  sceneManager.setCameraPreset(newPresetId)
 })
 
 onUnmounted(() => {

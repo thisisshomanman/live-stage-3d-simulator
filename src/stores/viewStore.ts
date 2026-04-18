@@ -4,11 +4,13 @@
  *
  * このファイルの目的:
  * - 現在選択中の視点IDを保持する
- * - 今後、Toolbar の視点切替UIと SceneManager をつなぐための土台にする
+ * - Toolbar の select と SceneCanvas の three.js カメラをつなぐ
+ * - 今後、視点切替UIや視点保存機能を追加しやすくする
  *
  * 現時点では:
- * - 初期視点を FOH にしている
- * - 利用可能な視点一覧も保持している
+ * - currentView: 現在の視点ID
+ * - availableViews: 利用可能な視点一覧
+ * - setCurrentView(): 視点変更用の action
  */
 
 import { defineStore } from 'pinia'
@@ -17,15 +19,26 @@ import type { CameraPresetId } from '@/types/view'
 export const useViewStore = defineStore('view', {
   state: () => ({
     /**
-     * 現在の視点ID。
-     * 今後、UI から変更できるようにする。
+     * 現在選択中の視点ID。
+     * 初期値は FOH にしておく。
      */
     currentView: 'foh' as CameraPresetId,
 
     /**
      * 利用可能な視点一覧。
-     * UI の select 生成時などで利用する想定。
+     * Toolbar の select に使う。
      */
     availableViews: ['free', 'foh', 'user-seat'] as CameraPresetId[],
   }),
+
+  actions: {
+    /**
+     * 現在の視点を変更する。
+     *
+     * @param presetId 切り替えたい視点ID
+     */
+    setCurrentView(presetId: CameraPresetId) {
+      this.currentView = presetId
+    },
+  },
 })

@@ -1,105 +1,67 @@
 <template>
   <section class="scene-canvas">
+    <!--
+      three.js の canvas を描画するためのコンテナ。
+      SceneManager が mounted 後にこの中へ canvas を追加する。
+    -->
     <div ref="canvasContainer" class="scene-canvas__container"></div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
-import * as THREE from 'three'
+/**
+ * ファイル概要:
+ * - three.js 描画の Vue 側入口となるコンポーネント
+ * - three.js の詳細処理は SceneManager に委譲する
+ *
+ * このファイルの責務:
+ * 1. 描画コンテナを持つ
+ * 2. mounted 時に SceneManager を初期化する
+ * 3. unmounted 時に SceneManager を破棄する
+ */
 
+import { onMounted, onUnmounted, ref } from 'vue'
+import { SceneManager } from '@/core/scene/SceneManager'
+
+/**
+ * three.js 描画先の DOM 要素。
+ */
 const canvasContainer = ref<HTMLElement | null>(null)
 
-let scene: THREE.Scene
-let camera: THREE.PerspectiveCamera
-let renderer: THREE.WebGLRenderer
-let animationFrameId = 0
-let cube: THREE.Mesh
-
-const handleResize = () => {
-  if (!canvasContainer.value || !camera || !renderer) return
-
-  const width = canvasContainer.value.clientWidth
-  const height = canvasContainer.value.clientHeight
-
-  camera.aspect = width / height
-  camera.updateProjectionMatrix()
-  renderer.setSize(width, height)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-}
-
-const animate = () => {
-  animationFrameId = requestAnimationFrame(animate)
-
-  if (cube) {
-    cube.rotation.x += 0.01
-    cube.rotation.y += 0.01
-  }
-
-  renderer.render(scene, camera)
-}
+/**
+ * three.js 全体を管理するクラス。
+ * mounted 時に生成し、unmounted 時に破棄する。
+ */
+let sceneManager: SceneManager | null = null
 
 onMounted(() => {
   if (!canvasContainer.value) return
 
-  const width = canvasContainer.value.clientWidth
-  const height = canvasContainer.value.clientHeight
-
-  scene = new THREE.Scene()
-  scene.background = new THREE.Color(0x111111)
-
-  camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000)
-  camera.position.set(3, 3, 6)
-  camera.lookAt(0, 0, 0)
-
-  renderer = new THREE.WebGLRenderer({ antialias: true })
-  renderer.setSize(width, height)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-  canvasContainer.value.appendChild(renderer.domElement)
-
-  const ambientLight = new THREE.AmbientLight(0xffffff, 1.5)
-  scene.add(ambientLight)
-
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 2)
-  directionalLight.position.set(5, 10, 7)
-  scene.add(directionalLight)
-
-  const gridHelper = new THREE.GridHelper(20, 20)
-  scene.add(gridHelper)
-
-  const axesHelper = new THREE.AxesHelper(3)
-  scene.add(axesHelper)
-
-  const geometry = new THREE.BoxGeometry(1, 1, 1)
-  const material = new THREE.MeshStandardMaterial({ color: 0x4fc3f7 })
-  cube = new THREE.Mesh(geometry, material)
-  scene.add(cube)
-
-  window.addEventListener('resize', handleResize)
-  animate()
+  sceneManager = new SceneManager(canvasContainer.value)
+  sceneManager.init()
+  sceneManager.start()
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  cancelAnimationFrame(animationFrameId)
-
-  if (renderer) {
-    renderer.dispose()
-  }
-
-  if (canvasContainer.value && renderer?.domElement) {
-    canvasContainer.value.removeChild(renderer.domElement)
-  }
+  sceneManager?.dispose()
+  sceneManager = null
 })
 </script>
 
 <style scoped>
+/**
+ * SceneCanvas 全体の見た目。
+ * App レイアウトの中央領域いっぱいに広がる想定。
+ */
 .scene-canvas {
   min-width: 0;
   min-height: 0;
   background: #111;
 }
 
+/**
+ * three.js の canvas を挿入するコンテナ。
+ */
 .scene-canvas__container {
   width: 100%;
   height: 100%;

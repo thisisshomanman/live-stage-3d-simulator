@@ -1,20 +1,21 @@
 /**
  * ファイル概要:
  * - three.js の Scene / Camera / Renderer / Controls を管理するクラス
- * - このクラスは、Vue コンポーネントから three.js の詳細責務を分離するために存在する
+ * - Vue コンポーネントから three.js の詳細責務を分離するために存在する
  *
  * 主な責務:
  * 1. three.js の初期化
  * 2. OrbitControls の設定
  * 3. レンダーループの実行
  * 4. リサイズ処理
- * 5. 後片付け
+ * 5. カメラプリセットの適用
+ * 6. 後片付け
  *
  * 今後の拡張想定:
- * - VenueBuilder の呼び出し
+ * - VenueBuilder / StageBuilder / SeatBlockBuilder の追加拡張
  * - SpeakerBuilder の呼び出し
  * - Scene 内オブジェクト選択連携
- * - カメラプリセット切替
+ * - Toolbar と連携した視点切替
  */
 
 import * as THREE from 'three'
@@ -23,6 +24,8 @@ import { createBaseSceneObjects, type BaseSceneObjects } from '@/core/scene/crea
 import { VenueBuilder } from '@/core/scene/VenueBuilder'
 import { StageBuilder } from '@/core/scene/StageBuilder'
 import { SeatBlockBuilder } from '@/core/scene/SeatBlockBuilder'
+import { findCameraPresetById } from '@/core/scene/cameraPresets'
+import type { CameraPresetId } from '@/types/view'
 
 export class SceneManager {
   /**
@@ -50,6 +53,12 @@ export class SceneManager {
    */
   private baseObjects!: BaseSceneObjects
 
+  /**
+   * 現在適用中のカメラプリセットID。
+   * 初期値は FOH にしておく。
+   */
+  private currentPresetId: CameraPresetId = 'foh'
+
   constructor(container: HTMLElement) {
     this.container = container
   }
@@ -65,6 +74,13 @@ export class SceneManager {
     this.createControls()
     this.createObjects()
     this.registerEvents()
+
+    /**
+     * 初期視点として FOH を適用する。
+     * ここでプリセット適用の流れを作っておくことで、
+     * 後で UI 連携しやすくなる。
+     */
+    this.setCameraPreset(this.currentPresetId)
   }
 
   /**
@@ -90,6 +106,45 @@ export class SceneManager {
 
     this.renderer.setSize(width, height)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  }
+
+  /**
+   * カメラプリセットを適用する。
+   *
+   * @param presetId 適用したいカメラプリセットID
+   */
+  public setCameraPreset(presetId: CameraPresetId): void {
+    const preset = findCameraPresetById(presetId)
+
+    if (!preset) {
+      return
+    }
+
+    /**
+     * カメラ位置をプリセット定義へ合わせる。
+     */
+    this.camera.position.set(preset.position.x, preset.position.y, preset.position.z)
+
+    /**
+     * OrbitControls の注視点をプリセット定義へ合わせる。
+     * lookAt ではなく target を更新するのが重要。
+     */
+    this.controls.target.set(preset.target.x, preset.target.y, preset.target.z)
+
+    /**
+     * damping を使っているため、位置変更後にも update する。
+     */
+    this.controls.update()
+
+    this.currentPresetId = presetId
+  }
+
+  /**
+   * 現在のカメラプリセットIDを返す。
+   * 後で UI 同期やデバッグに使えるようにしておく。
+   */
+  public getCurrentPresetId(): CameraPresetId {
+    return this.currentPresetId
   }
 
   /**
@@ -168,12 +223,6 @@ export class SceneManager {
      */
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.05
-
-    /**
-     * カメラの注視点。
-     * 今後はステージ中央などへ寄せていく予定。
-     */
-    this.controls.target.set(0, 0, 0)
 
     /**
      * ズーム距離の制限。
